@@ -1,5 +1,8 @@
+use std::sync::Arc;
+
 use crate::{
-    LinearColorStop, Quad, ScaledPixels, color, geometry, platform::wgpu_backend::WgpuContext,
+    DevicePixels, GpuSpecs, LinearColorStop, PlatformAtlas, PrimitiveBatch, Quad, ScaledPixels,
+    Scene, color, geometry, platform::wgpu_backend::WgpuContext,
 };
 
 const fn map_attributes<const N: usize>(
@@ -114,6 +117,26 @@ struct GlobalParams {
     viewport_size: [f32; 2],
     premultimated_alpha: u32,
     pad: u32,
+}
+
+impl GlobalParams {
+    const VERTEX_ATTRIBUTES: &'static [wgpu::VertexAttribute; 3] = &[
+        wgpu::VertexAttribute {
+            offset: std::mem::offset_of!(GlobalParams, viewport_size) as wgpu::BufferAddress,
+            shader_location: 0,
+            format: wgpu::VertexFormat::Float32x2,
+        },
+        wgpu::VertexAttribute {
+            offset: std::mem::offset_of!(GlobalParams, premultimated_alpha) as wgpu::BufferAddress,
+            shader_location: 1,
+            format: wgpu::VertexFormat::Uint32,
+        },
+        wgpu::VertexAttribute {
+            offset: std::mem::offset_of!(GlobalParams, pad) as wgpu::BufferAddress,
+            shader_location: 2,
+            format: wgpu::VertexFormat::Uint32,
+        },
+    ];
 }
 
 #[repr(C)]
@@ -383,14 +406,18 @@ impl PathRasterizationVertex {
 }
 
 struct WgpuPipelines {
+    globals_bind_group: wgpu::BindGroup,
     quads: wgpu::RenderPipeline,
-    shadows: wgpu::RenderPipeline,
-    path_rasterization: wgpu::RenderPipeline,
-    paths: wgpu::RenderPipeline,
-    underlines: wgpu::RenderPipeline,
-    mono_sprites: wgpu::RenderPipeline,
-    poly_sprites: wgpu::RenderPipeline,
-    surfaces: wgpu::RenderPipeline,
+    quads_bind_group: wgpu::BindGroup,
+    /*
+       shadows: wgpu::RenderPipeline,
+       path_rasterization: wgpu::RenderPipeline,
+       paths: wgpu::RenderPipeline,
+       underlines: wgpu::RenderPipeline,
+       mono_sprites: wgpu::RenderPipeline,
+       poly_sprites: wgpu::RenderPipeline,
+       surfaces: wgpu::RenderPipeline,
+    */
 }
 
 impl WgpuPipelines {
@@ -399,11 +426,11 @@ impl WgpuPipelines {
         surface_configuration: &wgpu::SurfaceConfiguration,
         path_sample_count: u32,
     ) -> Self {
-        let shader = context
+        let quads_shader = context
             .device
             .create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("shaders"),
-                source: wgpu::ShaderSource::Wgsl(include_str!("shaders.wgsl").into()),
+                label: Some("quads_shader"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/quads.wgsl").into()),
             });
 
         let blend_mode = match surface_configuration.alpha_mode {
@@ -419,7 +446,96 @@ impl WgpuPipelines {
             write_mask: wgpu::ColorWrites::ALL,
         })];
 
+        /*
+        let quads_bind_group_layout_2 =
+            context
+                .device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("quads_bind_group_layout_2"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        },
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 1,
+                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Storage { read_only: true },
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: Some(std::num::NonZeroU32::new(1).unwrap()),
+                        },
+                    ],
+                });
+
+
+        let quads_bind_group_2 = context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("quads_bind_group_2"),
+                layout: &quads_bind_group_layout_2,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &context.globals_buffer,
+                            offset: 0,
+                            size: None,
+                        }),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                            buffer: &context.quads_buffer,
+                            offset: 0,
+                            size: None,
+                        }),
+                    },
+                ],
+            });
+          */
+
         // TODO(mdeand): Potentially create a pipeline cache for optimization?
+
+        let globals_bind_group_layout =
+            context
+                .device
+                .create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                    label: Some("globals"),
+                    entries: &[wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Uniform,
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    }],
+                });
+
+        let globals_bind_group = context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("globals_bind_group"),
+                layout: &globals_bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &context.globals_buffer,
+                        offset: 0,
+                        size: None,
+                    }),
+                }],
+            });
 
         let quads_bind_group_layout =
             context
@@ -434,31 +550,52 @@ impl WgpuPipelines {
                             has_dynamic_offset: false,
                             min_binding_size: None,
                         },
-                        count: None,
+                        count: Some(std::num::NonZero::new(1).unwrap()),
                     }],
                 });
+
+        let quads_bind_group = context
+            .device
+            .create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("quads_bind_group"),
+                layout: &quads_bind_group_layout,
+                entries: &[wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &context.quads_buffer,
+                        offset: 0,
+                        size: None,
+                    }),
+                }],
+            });
 
         let quads_pipeline_layout =
             context
                 .device
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("quads_pipeline_layout"),
-                    bind_group_layouts: &[&quads_bind_group_layout],
+                    bind_group_layouts: &[&globals_bind_group_layout, &quads_bind_group_layout],
                     push_constant_ranges: &[],
                 });
 
         Self {
+            // globals_bind_group,
+            globals_bind_group,
+
             quads: context
                 .device
                 .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
                     label: Some("quads"),
-                    // TODO: layout
                     layout: Some(&quads_pipeline_layout),
                     vertex: wgpu::VertexState {
-                        module: &shader,
-                        entry_point: Some("vs_quads"),
+                        module: &quads_shader,
+                        entry_point: Some("vs_quad"),
                         compilation_options: wgpu::PipelineCompilationOptions::default(),
-                        buffers: &[],
+                        buffers: &[wgpu::VertexBufferLayout {
+                            array_stride: std::mem::size_of::<Quad>() as wgpu::BufferAddress,
+                            step_mode: wgpu::VertexStepMode::Vertex,
+                            attributes: Quad::VERTEX_ATTRIBUTES,
+                        }],
                     },
                     primitive: wgpu::PrimitiveState {
                         topology: wgpu::PrimitiveTopology::TriangleStrip,
@@ -467,7 +604,7 @@ impl WgpuPipelines {
                     depth_stencil: None,
                     multisample: wgpu::MultisampleState::default(),
                     fragment: Some(wgpu::FragmentState {
-                        module: &shader,
+                        module: &quads_shader,
                         entry_point: Some("fs_quad"),
                         compilation_options: wgpu::PipelineCompilationOptions::default(),
                         targets: color_targets,
@@ -475,6 +612,8 @@ impl WgpuPipelines {
                     multiview: None,
                     cache: None,
                 }),
+            quads_bind_group,
+            /*
             shadows: context
                 .device
                 .create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -675,6 +814,171 @@ impl WgpuPipelines {
                     multiview: None,
                     cache: None,
                 }),
+               */
         }
+    }
+}
+
+struct RenderingParameters {
+    path_sample_count: u32,
+    gamma_ratios: [f32; 4],
+    grayscale_enhanced_contrast: f32,
+}
+
+pub struct WgpuRenderer {
+    context: Arc<WgpuContext>,
+    surface: wgpu::Surface<'static>,
+    surface_configuration: wgpu::SurfaceConfiguration,
+    command_encoder: wgpu::CommandEncoder,
+    pipelines: WgpuPipelines,
+}
+
+impl WgpuRenderer {
+    pub fn new<WindowHandle>(
+        context: Arc<WgpuContext>,
+        window: WindowHandle,
+        width: u32,
+        height: u32,
+        path_sample_count: u32,
+    ) -> anyhow::Result<Self>
+    where
+        WindowHandle: raw_window_handle::HasWindowHandle + raw_window_handle::HasDisplayHandle,
+    {
+        let surface = unsafe {
+            context
+                .instance
+                .create_surface_unsafe(wgpu::SurfaceTargetUnsafe::RawHandle {
+                    raw_display_handle: window.display_handle()?.as_raw(),
+                    raw_window_handle: window.window_handle()?.as_raw(),
+                })?
+        };
+
+        let surface_configuration = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: surface.get_capabilities(&context.adapter).formats[0],
+            width,
+            height,
+            present_mode: wgpu::PresentMode::Fifo,
+            alpha_mode: wgpu::CompositeAlphaMode::PreMultiplied,
+            view_formats: vec![],
+            // TODO(mdeand): Make this configurable?
+            desired_maximum_frame_latency: 2,
+        };
+
+        let command_encoder =
+            context
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("main"),
+                });
+
+        let pipelines =
+            WgpuPipelines::new(context.as_ref(), &surface_configuration, path_sample_count);
+
+        Ok(Self {
+            context: context.clone(),
+            surface,
+            surface_configuration,
+            command_encoder,
+            pipelines,
+        })
+    }
+
+    pub fn draw(&mut self, scene: &Scene) {
+        let mut pass = self
+            .command_encoder
+            .begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("main"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &self
+                        .surface
+                        .get_current_texture()
+                        .expect("Failed to acquire next swap chain texture")
+                        .texture
+                        .create_view(&wgpu::TextureViewDescriptor::default()),
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                    resolve_target: None,
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+
+        let globals = GlobalParams {
+            viewport_size: [
+                self.surface_configuration.width as f32,
+                self.surface_configuration.height as f32,
+            ],
+            premultimated_alpha: match self.surface_configuration.alpha_mode {
+                wgpu::CompositeAlphaMode::PreMultiplied => 1,
+                _ => 0,
+            },
+            pad: 0,
+        };
+
+        self.context.queue.write_buffer(
+            &self.context.globals_buffer,
+            0,
+            bytemuck::bytes_of(&globals),
+        );
+
+        for batch in scene.batches() {
+            match batch {
+                PrimitiveBatch::Quads(quads) => {
+                    self.context
+                        .queue
+                        .write_buffer(&self.context.quads_buffer, 0, unsafe {
+                            std::slice::from_raw_parts(
+                                quads.as_ptr() as *const u8,
+                                quads.len() * std::mem::size_of::<Quad>(),
+                            )
+                        });
+
+                    pass.set_pipeline(&self.pipelines.quads);
+                    pass.set_bind_group(0, &self.pipelines.globals_bind_group, &[]);
+                    pass.set_bind_group(1, &self.pipelines.quads_bind_group, &[]);
+                    pass.draw(0..4, 0..quads.len() as u32);
+                }
+                // TODO(mdeand): Implement other batch types.
+                _ => {}
+            }
+        }
+    }
+
+    pub fn update_drawable_size(&mut self, size: geometry::Size<DevicePixels>) {
+        self.surface_configuration.width = size.width.0 as u32;
+        self.surface_configuration.height = size.height.0 as u32;
+        self.surface
+            .configure(&self.context.device, &self.surface_configuration);
+
+        todo!()
+    }
+
+    pub fn sprite_atlas(&self) -> Arc<dyn PlatformAtlas> {
+        todo!()
+    }
+
+    pub fn gpu_specs(&self) -> GpuSpecs {
+        todo!()
+    }
+
+    pub fn update_transparency(&mut self, transparent: bool) {
+        self.surface_configuration.alpha_mode = if transparent {
+            wgpu::CompositeAlphaMode::PreMultiplied
+        } else {
+            wgpu::CompositeAlphaMode::Opaque
+        };
+        self.surface
+            .configure(&self.context.device, &self.surface_configuration);
+
+        todo!()
+    }
+
+    pub fn destroy(&mut self) {
+       println!("WgpuRenderer destroyed"); 
+       // TODO(mdeand): Implement proper destruction logic.
     }
 }

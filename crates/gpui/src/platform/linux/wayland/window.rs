@@ -30,7 +30,9 @@ use crate::{
     PlatformDisplay, PlatformInput, Point, PromptButton, PromptLevel, RequestFrameOptions,
     ResizeEdge, Size, Tiling, WaylandClientStatePtr, WindowAppearance, WindowBackgroundAppearance,
     WindowBounds, WindowControlArea, WindowControls, WindowDecorations, WindowParams,
-    layer_shell::LayerShellNotSupportedError, px, size,
+    layer_shell::LayerShellNotSupportedError,
+    platform::wgpu_backend::{WgpuContext, WgpuRenderer},
+    px, size,
 };
 use crate::{
     Capslock,
@@ -95,7 +97,7 @@ pub struct WaylandWindowState {
     outputs: HashMap<ObjectId, Output>,
     display: Option<(ObjectId, Output)>,
     globals: Globals,
-    renderer: BladeRenderer,
+    renderer: WgpuRenderer,
     bounds: Bounds<Pixels>,
     scale: f32,
     input_handler: Option<PlatformInputHandler>,
@@ -286,7 +288,7 @@ impl WaylandWindowState {
         viewport: Option<wp_viewport::WpViewport>,
         client: WaylandClientStatePtr,
         globals: Globals,
-        gpu_context: &BladeContext,
+        gpu_context: Arc<WgpuContext>,
         options: WindowParams,
     ) -> anyhow::Result<Self> {
         let renderer = {
@@ -307,7 +309,14 @@ impl WaylandWindowState {
                 },
                 transparent: true,
             };
-            BladeRenderer::new(gpu_context, &raw_window, config)?
+            // TODO(mdeand): Configuration of sample count
+            WgpuRenderer::new(
+                gpu_context,
+                &raw_window,
+                options.bounds.size.width.0 as u32,
+                options.bounds.size.height.0 as u32,
+                4,
+            )?
         };
 
         if let WaylandSurfaceState::Xdg(ref xdg_state) = surface_state {
@@ -444,7 +453,7 @@ impl WaylandWindow {
     pub fn new(
         handle: AnyWindowHandle,
         globals: Globals,
-        gpu_context: &BladeContext,
+        gpu_context: Arc<WgpuContext>,
         client: WaylandClientStatePtr,
         params: WindowParams,
         appearance: WindowAppearance,

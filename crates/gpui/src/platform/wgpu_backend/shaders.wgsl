@@ -1,3 +1,240 @@
+struct Globals {
+  @location(0) viewport_size: vec2<f32>,
+  @location(1) premultiplied_alpha: u32,
+  @location(2) pad: u32,
+}
+
+struct Bounds {
+  origin: vec2<f32>,
+  size: vec2<f32>,
+}
+
+struct Corners {
+  top_left: f32,
+  top_right: f32,
+  bottom_right: f32,
+  bottom_left: f32,
+}
+
+struct Edges {
+  top: f32,
+  right: f32,
+  bottom: f32,
+  left: f32,
+}
+
+struct Hsla {
+  h: f32,
+  s: f32,
+  l: f32,
+  a: f32,
+}
+
+struct LinearColorStop {
+  color: Hsla,
+  percentage: f32,
+}
+
+struct Background {
+  tag: u32,
+  color_space: u32,
+  solid: Hsla,
+  gradient_angle_or_pattern_height: f32,
+  colors_0: LinearColorStop,
+  colors_1: LinearColorStop,
+  pad: u32,
+}
+
+struct AtlasTextureId {
+  index: u32,
+  kind: u32,
+}
+
+struct AtlasBounds {
+  origin: vec2<f32>,
+  size: vec2<f32>,
+}
+
+struct AtlasTile {
+  texture_id: AtlasTextureId,
+  tile_id: u32,
+  padding: u32,
+  bounds: AtlasBounds,
+}
+
+struct TransformationMatrix {
+  rotation_scale: mat2x2<f32>,
+  translation: vec2<f32>,
+}
+
+struct GradientColor {
+  solid: vec4<f32>,
+  color0: vec4<f32>,
+  color1: vec4<f32>,
+}
+
+struct Quad {
+  order: u32,
+  border_style: u32,
+  bounds: Bounds,
+  content_mask: Bounds,
+  background: Background,
+  border_color: Hsla,
+  corner_radii: Corners,
+  border_widths: Edges,
+}
+
+struct QuadVarying {
+  @builtin(position) position: vec4<f32>,
+  @location(0) @interpolate(flat) border_color: vec4<f32>,
+  @location(1) @interpolate(flat) quad_id: u32,
+  // TODO: use `clip_distance` when naga supports it.
+  @location(2) clip_distances: vec4<f32>,
+  @location(3) @interpolate(flat) background_solid: vec4<f32>,
+  @location(4) @interpolate(flat) background_color0: vec4<f32>,
+  @location(5) @interpolate(flat) background_color1: vec4<f32>,
+}
+
+struct Shadow {
+  order: u32,
+  blur_radius: f32,
+  bounds: Bounds,
+  corner_radii: Corners,
+  content_mask: Bounds,
+  color: Hsla,
+}
+
+struct ShadowVarying {
+  @builtin(position) position: vec4<f32>,
+  @location(0) @interpolate(flat) color: vec4<f32>,
+  @location(1) /* @interpolate(flat) */ shadow_id: u32,
+  @location(2) clip_distances: vec4<f32>, 
+}
+
+struct PathRasterizationVertex {
+  xy_position: vec2<f32>,
+  st_position: vec2<f32>,
+  color: Background,
+  bounds: Bounds
+}
+
+struct PathRasterizationVarying {
+  @builtin(position) position: vec4<f32>,
+  @location(0) st_position: vec2<f32>,
+  @location(1) vertex_id: u32,
+  //TODO: use `clip_distance` once Naga supports it
+  @location(2) clip_distances: vec4<f32>,
+}
+
+struct PathSprite {
+  bounds: Bounds,
+}
+
+struct PathVarying {
+  @builtin(position) position: vec4<f32>,
+  @location(0) texture_coords: vec2<f32>,
+}
+
+struct Underline {
+  order: u32,
+  pad: u32,
+  bounds: Bounds,
+  content_mask: Bounds,
+  color: Hsla,
+  thickness: f32,
+  wavy: u32,
+}
+
+struct UnderlineVarying {
+    @builtin(position) position: vec4<f32>,
+    @location(0) @interpolate(flat) color: vec4<f32>,
+    @location(1) @interpolate(flat) underline_id: u32,
+    //TODO: use `clip_distance` once Naga supports it
+    @location(2) clip_distances: vec4<f32>,
+}
+
+struct MonochromeSprite {
+    order: u32,
+    pad: u32,
+    bounds: Bounds,
+    content_mask: Bounds,
+    color: Hsla,
+    tile: AtlasTile,
+    transformation: TransformationMatrix,
+}
+
+struct MonoSpriteVarying {
+    @builtin(position) position: vec4<f32>,
+    @location(0) tile_position: vec2<f32>,
+    @location(1) @interpolate(flat) color: vec4<f32>,
+    @location(2) clip_distances: vec4<f32>,
+}
+
+struct PolychromeSprite {
+    order: u32,
+    pad: u32,
+    grayscale: u32,
+    opacity: f32,
+    bounds: Bounds,
+    content_mask: Bounds,
+    corner_radii: Corners,
+    tile: AtlasTile,
+}
+
+struct PolySpriteVarying {
+    @builtin(position) position: vec4<f32>,
+    @location(0) tile_position: vec2<f32>,
+    @location(1) @interpolate(flat) sprite_id: u32,
+    @location(3) clip_distances: vec4<f32>,
+}
+
+struct SurfaceParams {
+    bounds: Bounds,
+    content_mask: Bounds,
+}
+
+struct SurfaceVarying {
+  @builtin(position) position: vec4<f32>,
+  @location(0) texture_position: vec2<f32>,
+  @location(1) clip_distances: vec4<f32>,
+}
+
+@group(0) @binding(0) var<uniform> globals: Globals;
+
+@group(1) @binding(0) var<uniform> gamma_ratios: vec4<f32>;
+@group(1) @binding(1) var<uniform> grayscale_enhanced_contrast: f32;
+
+@group(2) @binding(0) var t_sprite: texture_2d<f32>;
+@group(2) @binding(1) var s_sprite: sampler;
+
+@group(2) @binding(0) var<storage, read> b_quads: array<Quad>;
+
+@group(2) @binding(0) var<storage, read> b_shadows: array<Shadow>;
+
+@group(2) @binding(0) var<storage, read> b_path_vertices: array<PathRasterizationVertex>;
+
+@group(2) @binding(0) var<storage, read> b_path_sprites: array<PathSprite>;
+
+@group(2) @binding(0) var<storage, read> b_underlines: array<Underline>;
+
+@group(2) @binding(0) var<storage, read> b_mono_sprites: array<MonochromeSprite>;
+
+@group(2) @binding(0) var<storage, read> b_poly_sprites: array<PolychromeSprite>;
+
+@group(2) @binding(0) var<storage, read> surface_locals: SurfaceParams;
+@group(2) @binding(1) var t_y: texture_2d<f32>;
+@group(2) @binding(2) var t_cb_cr: texture_2d<f32>;
+@group(2) @binding(3) var s_surface: sampler;
+
+const M_PI_F: f32 = 3.1415926;
+const GRAYSCALE_FACTORS: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
+const ycbcr_to_RGB = mat4x4<f32>(
+    vec4<f32>( 1.0000f,  1.0000f,  1.0000f, 0.0),
+    vec4<f32>( 0.0000f, -0.3441f,  1.7720f, 0.0),
+    vec4<f32>( 1.4020f, -0.7141f,  0.0000f, 0.0),
+    vec4<f32>(-0.7010f,  0.5291f, -0.8860f, 1.0),
+);
+
 /* Functions useful for debugging:
 
 // A heat map color for debugging (blue -> cyan -> green -> yellow -> red).
@@ -60,88 +297,6 @@ fn apply_contrast_and_gamma_correction(sample: f32, color: vec3<f32>, enhanced_c
     return apply_alpha_correction(contrasted, brightness, gamma_ratios);
 }
 
-struct GlobalParams {
-    viewport_size: vec2<f32>,
-    premultiplied_alpha: u32,
-    pad: u32,
-}
-
-var<uniform> globals: GlobalParams;
-var<uniform> gamma_ratios: vec4<f32>;
-var<uniform> grayscale_enhanced_contrast: f32;
-var t_sprite: texture_2d<f32>;
-var s_sprite: sampler;
-
-const M_PI_F: f32 = 3.1415926;
-const GRAYSCALE_FACTORS: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
-
-struct Bounds {
-    origin: vec2<f32>,
-    size: vec2<f32>,
-}
-
-struct Corners {
-    top_left: f32,
-    top_right: f32,
-    bottom_right: f32,
-    bottom_left: f32,
-}
-
-struct Edges {
-    top: f32,
-    right: f32,
-    bottom: f32,
-    left: f32,
-}
-
-struct Hsla {
-    h: f32,
-    s: f32,
-    l: f32,
-    a: f32,
-}
-
-struct LinearColorStop {
-    color: Hsla,
-    percentage: f32,
-}
-
-struct Background {
-    // 0u is Solid
-    // 1u is LinearGradient
-    // 2u is PatternSlash
-    tag: u32,
-    // 0u is sRGB linear color
-    // 1u is Oklab color
-    color_space: u32,
-    solid: Hsla,
-    gradient_angle_or_pattern_height: f32,
-    colors_0: LinearColorStop,
-    colors_1: LinearColorStop,
-    pad: u32,
-}
-
-struct AtlasTextureId {
-    index: u32,
-    kind: u32,
-}
-
-struct AtlasBounds {
-    origin: vec2<i32>,
-    size: vec2<i32>,
-}
-
-struct AtlasTile {
-    texture_id: AtlasTextureId,
-    tile_id: u32,
-    padding: u32,
-    bounds: AtlasBounds,
-}
-
-struct TransformationMatrix {
-    rotation_scale: mat2x2<f32>,
-    translation: vec2<f32>,
-}
 
 fn to_device_position_impl(position: vec2<f32>) -> vec4<f32> {
     let device_position = position / globals.viewport_size * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0);
@@ -371,14 +526,8 @@ fn blend_color(color: vec4<f32>, alpha_factor: f32) -> vec4<f32> {
 }
 
 
-struct GradientColor {
-    solid: vec4<f32>,
-    color0: vec4<f32>,
-    color1: vec4<f32>,
-}
-
 fn prepare_gradient_color(tag: u32, color_space: u32,
-    solid: Hsla, colors: array<LinearColorStop, 2>) -> GradientColor {
+    solid: Hsla, colors_0: LinearColorStop, colors_1: LinearColorStop) -> GradientColor {
     var result = GradientColor();
 
     if (tag == 0u || tag == 2u) {
@@ -477,29 +626,58 @@ fn gradient_color(background: Background, position: vec2<f32>, bounds: Bounds,
     return background_color;
 }
 
-// --- quads --- //
 
-struct Quad {
-    order: u32,
-    border_style: u32,
-    bounds: Bounds,
-    content_mask: Bounds,
-    background: Background,
-    border_color: Hsla,
-    corner_radii: Corners,
-    border_widths: Edges,
+// Returns the dash velocity of a corner given the dash velocity of the two
+// sides, by returning the slower velocity (larger dashes).
+//
+// Since 0 is used for dash velocity when the border width is 0 (instead of
+// +inf), this returns the other dash velocity in that case.
+//
+// An alternative to this might be to appropriately interpolate the dash
+// velocity around the corner, but that seems overcomplicated.
+fn corner_dash_velocity(dv1: f32, dv2: f32) -> f32 {
+    if (dv1 == 0.0) {
+        return dv2;
+    } else if (dv2 == 0.0) {
+        return dv1;
+    } else {
+        return min(dv1, dv2);
+    }
 }
-@binding(0) var<storage, read> b_quads: array<Quad>;
 
-struct QuadVarying {
-    @builtin(position) position: vec4<f32>,
-    @location(0) @interpolate(flat) border_color: vec4<f32>,
-    @location(1) @interpolate(flat) quad_id: u32,
-    // TODO: use `clip_distance` once Naga supports it
-    @location(2) clip_distances: vec4<f32>,
-    @location(3) @interpolate(flat) background_solid: vec4<f32>,
-    @location(4) @interpolate(flat) background_color0: vec4<f32>,
-    @location(5) @interpolate(flat) background_color1: vec4<f32>,
+// Returns alpha used to render antialiased dashes.
+// `t` is within the dash when `fmod(t, period) < length`.
+fn dash_alpha(t: f32, period: f32, length: f32, dash_velocity: f32, antialias_threshold: f32) -> f32 {
+    let half_period = period / 2;
+    let half_length = length / 2;
+    // Value in [-half_period, half_period].
+    // The dash is in [-half_length, half_length].
+    let centered = fmod(t + half_period - half_length, period) - half_period;
+    // Signed distance for the dash, negative values are inside the dash.
+    let signed_distance = abs(centered) - half_length;
+    // Antialiased alpha based on the signed distance.
+    return saturate(antialias_threshold - signed_distance / dash_velocity);
+}
+
+// This approximates distance to the nearest point to a quarter ellipse in a way
+// that is sufficient for anti-aliasing when the ellipse is not very eccentric.
+// The components of `point` are expected to be positive.
+//
+// Negative on the outside and positive on the inside.
+fn quarter_ellipse_sdf(point: vec2<f32>, radii: vec2<f32>) -> f32 {
+    // Scale the space to treat the ellipse like a unit circle.
+    let circle_vec = point / radii;
+    let unit_circle_sdf = length(circle_vec) - 1.0;
+    // Approximate up-scaling of the length by using the average of the radii.
+    //
+    // TODO: A better solution would be to use the gradient of the implicit
+    // function for an ellipse to approximate a scaling factor.
+    return unit_circle_sdf * (radii.x + radii.y) * -0.5;
+}
+
+// Modulus that has the same sign as `a`.
+fn fmod(a: f32, b: f32) -> f32 {
+    return a - b * trunc(a / b);
 }
 
 @vertex
@@ -514,7 +692,8 @@ fn vs_quad(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) insta
         quad.background.tag,
         quad.background.color_space,
         quad.background.solid,
-        quad.background.colors
+        quad.background.colors_0,
+        quad.background.colors_1
     );
     out.background_solid = gradient.solid;
     out.background_color0 = gradient.color0;
@@ -856,79 +1035,6 @@ fn fs_quad(input: QuadVarying) -> @location(0) vec4<f32> {
     return blend_color(color, saturate(antialias_threshold - outer_sdf));
 }
 
-// Returns the dash velocity of a corner given the dash velocity of the two
-// sides, by returning the slower velocity (larger dashes).
-//
-// Since 0 is used for dash velocity when the border width is 0 (instead of
-// +inf), this returns the other dash velocity in that case.
-//
-// An alternative to this might be to appropriately interpolate the dash
-// velocity around the corner, but that seems overcomplicated.
-fn corner_dash_velocity(dv1: f32, dv2: f32) -> f32 {
-    if (dv1 == 0.0) {
-        return dv2;
-    } else if (dv2 == 0.0) {
-        return dv1;
-    } else {
-        return min(dv1, dv2);
-    }
-}
-
-// Returns alpha used to render antialiased dashes.
-// `t` is within the dash when `fmod(t, period) < length`.
-fn dash_alpha(t: f32, period: f32, length: f32, dash_velocity: f32, antialias_threshold: f32) -> f32 {
-    let half_period = period / 2;
-    let half_length = length / 2;
-    // Value in [-half_period, half_period].
-    // The dash is in [-half_length, half_length].
-    let centered = fmod(t + half_period - half_length, period) - half_period;
-    // Signed distance for the dash, negative values are inside the dash.
-    let signed_distance = abs(centered) - half_length;
-    // Antialiased alpha based on the signed distance.
-    return saturate(antialias_threshold - signed_distance / dash_velocity);
-}
-
-// This approximates distance to the nearest point to a quarter ellipse in a way
-// that is sufficient for anti-aliasing when the ellipse is not very eccentric.
-// The components of `point` are expected to be positive.
-//
-// Negative on the outside and positive on the inside.
-fn quarter_ellipse_sdf(point: vec2<f32>, radii: vec2<f32>) -> f32 {
-    // Scale the space to treat the ellipse like a unit circle.
-    let circle_vec = point / radii;
-    let unit_circle_sdf = length(circle_vec) - 1.0;
-    // Approximate up-scaling of the length by using the average of the radii.
-    //
-    // TODO: A better solution would be to use the gradient of the implicit
-    // function for an ellipse to approximate a scaling factor.
-    return unit_circle_sdf * (radii.x + radii.y) * -0.5;
-}
-
-// Modulus that has the same sign as `a`.
-fn fmod(a: f32, b: f32) -> f32 {
-    return a - b * trunc(a / b);
-}
-
-// --- shadows --- //
-
-struct Shadow {
-    order: u32,
-    blur_radius: f32,
-    bounds: Bounds,
-    corner_radii: Corners,
-    content_mask: Bounds,
-    color: Hsla,
-}
-var<storage, read> b_shadows: array<Shadow>;
-
-struct ShadowVarying {
-    @builtin(position) position: vec4<f32>,
-    @location(0) @interpolate(flat) color: vec4<f32>,
-    @location(1) @interpolate(flat) shadow_id: u32,
-    //TODO: use `clip_distance` once Naga supports it
-    @location(3) clip_distances: vec4<f32>,
-}
-
 @vertex
 fn vs_shadow(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) instance_id: u32) -> ShadowVarying {
     let unit_vertex = vec2<f32>(f32(vertex_id & 1u), 0.5 * f32(vertex_id & 2u));
@@ -982,24 +1088,6 @@ fn fs_shadow(input: ShadowVarying) -> @location(0) vec4<f32> {
     return blend_color(input.color, alpha);
 }
 
-// --- path rasterization --- //
-
-struct PathRasterizationVertex {
-    xy_position: vec2<f32>,
-    st_position: vec2<f32>,
-    color: Background,
-    bounds: Bounds,
-}
-
-var<storage, read> b_path_vertices: array<PathRasterizationVertex>;
-
-struct PathRasterizationVarying {
-    @builtin(position) position: vec4<f32>,
-    @location(0) st_position: vec2<f32>,
-    @location(1) vertex_id: u32,
-    //TODO: use `clip_distance` once Naga supports it
-    @location(3) clip_distances: vec4<f32>,
-}
 
 @vertex
 fn vs_path_rasterization(@builtin(vertex_index) vertex_id: u32) -> PathRasterizationVarying {
@@ -1039,24 +1127,14 @@ fn fs_path_rasterization(input: PathRasterizationVarying) -> @location(0) vec4<f
         background.tag,
         background.color_space,
         background.solid,
-        background.colors,
+        background.colors_0,
+        background.colors_1
     );
     let color = gradient_color(background, input.position.xy, bounds,
         gradient_color.solid, gradient_color.color0, gradient_color.color1);
     return vec4<f32>(color.rgb * color.a * alpha, color.a * alpha);
 }
 
-// --- paths --- //
-
-struct PathSprite {
-    bounds: Bounds,
-}
-var<storage, read> b_path_sprites: array<PathSprite>;
-
-struct PathVarying {
-    @builtin(position) position: vec4<f32>,
-    @location(0) texture_coords: vec2<f32>,
-}
 
 @vertex
 fn vs_path(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) instance_id: u32) -> PathVarying {
@@ -1081,26 +1159,6 @@ fn fs_path(input: PathVarying) -> @location(0) vec4<f32> {
     return sample;
 }
 
-// --- underlines --- //
-
-struct Underline {
-    order: u32,
-    pad: u32,
-    bounds: Bounds,
-    content_mask: Bounds,
-    color: Hsla,
-    thickness: f32,
-    wavy: u32,
-}
-var<storage, read> b_underlines: array<Underline>;
-
-struct UnderlineVarying {
-    @builtin(position) position: vec4<f32>,
-    @location(0) @interpolate(flat) color: vec4<f32>,
-    @location(1) @interpolate(flat) underline_id: u32,
-    //TODO: use `clip_distance` once Naga supports it
-    @location(3) clip_distances: vec4<f32>,
-}
 
 @vertex
 fn vs_underline(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) instance_id: u32) -> UnderlineVarying {
@@ -1147,25 +1205,6 @@ fn fs_underline(input: UnderlineVarying) -> @location(0) vec4<f32> {
     return blend_color(input.color, alpha * input.color.a);
 }
 
-// --- monochrome sprites --- //
-
-struct MonochromeSprite {
-    order: u32,
-    pad: u32,
-    bounds: Bounds,
-    content_mask: Bounds,
-    color: Hsla,
-    tile: AtlasTile,
-    transformation: TransformationMatrix,
-}
-var<storage, read> b_mono_sprites: array<MonochromeSprite>;
-
-struct MonoSpriteVarying {
-    @builtin(position) position: vec4<f32>,
-    @location(0) tile_position: vec2<f32>,
-    @location(1) @interpolate(flat) color: vec4<f32>,
-    @location(3) clip_distances: vec4<f32>,
-}
 
 @vertex
 fn vs_mono_sprite(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) instance_id: u32) -> MonoSpriteVarying {
@@ -1193,27 +1232,6 @@ fn fs_mono_sprite(input: MonoSpriteVarying) -> @location(0) vec4<f32> {
 
     // convert to srgb space as the rest of the code (output swapchain) expects that
     return blend_color(input.color, alpha_corrected);
-}
-
-// --- polychrome sprites --- //
-
-struct PolychromeSprite {
-    order: u32,
-    pad: u32,
-    grayscale: u32,
-    opacity: f32,
-    bounds: Bounds,
-    content_mask: Bounds,
-    corner_radii: Corners,
-    tile: AtlasTile,
-}
-var<storage, read> b_poly_sprites: array<PolychromeSprite>;
-
-struct PolySpriteVarying {
-    @builtin(position) position: vec4<f32>,
-    @location(0) tile_position: vec2<f32>,
-    @location(1) @interpolate(flat) sprite_id: u32,
-    @location(3) clip_distances: vec4<f32>,
 }
 
 @vertex
@@ -1248,30 +1266,6 @@ fn fs_poly_sprite(input: PolySpriteVarying) -> @location(0) vec4<f32> {
     return blend_color(color, sprite.opacity * saturate(0.5 - distance));
 }
 
-// --- surfaces --- //
-
-struct SurfaceParams {
-    bounds: Bounds,
-    content_mask: Bounds,
-}
-
-var<uniform> surface_locals: SurfaceParams;
-var t_y: texture_2d<f32>;
-var t_cb_cr: texture_2d<f32>;
-var s_surface: sampler;
-
-const ycbcr_to_RGB = mat4x4<f32>(
-    vec4<f32>( 1.0000f,  1.0000f,  1.0000f, 0.0),
-    vec4<f32>( 0.0000f, -0.3441f,  1.7720f, 0.0),
-    vec4<f32>( 1.4020f, -0.7141f,  0.0000f, 0.0),
-    vec4<f32>(-0.7010f,  0.5291f, -0.8860f, 1.0),
-);
-
-struct SurfaceVarying {
-    @builtin(position) position: vec4<f32>,
-    @location(0) texture_position: vec2<f32>,
-    @location(3) clip_distances: vec4<f32>,
-}
 
 @vertex
 fn vs_surface(@builtin(vertex_index) vertex_id: u32) -> SurfaceVarying {
