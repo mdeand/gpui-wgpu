@@ -3,10 +3,11 @@ use std::sync::Arc;
 use collections::FxHashMap;
 use etagere::BucketedAtlasAllocator;
 use parking_lot::Mutex;
+use wgpu::util::DeviceExt;
 
 use crate::{
     AtlasKey, AtlasTextureId, AtlasTextureKind, AtlasTile, Bounds, DevicePixels, PlatformAtlas,
-    Size,
+    Point, Size,
     platform::{AtlasTextureList, wgpu_backend::WgpuContext},
 };
 
@@ -30,18 +31,11 @@ impl WgpuAtlas {
     }
 
     pub fn before_frame(&self, encoder: &mut wgpu::CommandEncoder) {
-        let mut state = self.0.lock();
-
-        // Process any pending initializations
-        for texture_id in state.initializations.drain(..) {
-            todo!()
-        }
+        self.0.lock().flush(encoder);
     }
 
     pub fn after_frame(&self) {
-        let mut state = self.0.lock();
-
-        todo!()
+        // TODO(mdeand): Is this even necessary?
     }
 
     pub fn get_texture_info(&self, texture_id: AtlasTextureId) -> WgpuTextureInfo {
@@ -105,8 +99,6 @@ impl PlatformAtlas for WgpuAtlas {
                 *texture_slot = Some(texture);
             }
         }
-
-        todo!()
     }
 }
 
@@ -122,7 +114,18 @@ struct WgpuAtlasState {
 
 impl WgpuAtlasState {
     fn allocate(&mut self, size: Size<DevicePixels>, texture_kind: AtlasTextureKind) -> AtlasTile {
-        todo!()
+        {
+            let textures = &mut self.storage[texture_kind];
+
+            if let Some(tile) = textures.iter_mut().rev().find_map(|x| x.allocate(size)) {
+                return tile;
+            }
+        }
+
+        let texture = self.push_texture(size, texture_kind);
+
+        // TODO(mdeand): Note this unwrap use.
+        texture.allocate(size).unwrap()
     }
 
     fn push_texture(
@@ -130,7 +133,91 @@ impl WgpuAtlasState {
         min_size: Size<DevicePixels>,
         texture_kind: AtlasTextureKind,
     ) -> &mut WgpuAtlasTexture {
-        todo!()
+        const DEFAULT_ATLAS_SIZE: Size<DevicePixels> = Size {
+            width: DevicePixels(1024),
+            height: DevicePixels(1024),
+        };
+
+        let size = min_size.max(&DEFAULT_ATLAS_SIZE);
+
+        let (format, usage) = match texture_kind {
+            AtlasTextureKind::Monochrome => (
+                wgpu::TextureFormat::R8Unorm,
+                // TODO(mdeand): Consider usages
+                wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST,
+            ),
+            AtlasTextureKind::Polychrome => (
+                wgpu::TextureFormat::Rgba8Unorm,
+                // TODO(mdeand): Consider usages
+                wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST,
+            ),
+        };
+
+        let texture_raw = self
+            .context
+            .device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("Atlas Texture"),
+                size: wgpu::Extent3d {
+                    width: size.width.0 as u32,
+                    height: size.height.0 as u32,
+                    depth_or_array_layers: 1,
+                },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format,
+                usage,
+                // TODO(mdeand): Create view formats?
+                view_formats: &[],
+            });
+
+        let texture_raw_view = texture_raw.create_view(&wgpu::TextureViewDescriptor {
+            label: Some("Atlas Texture Raw"),
+            format: Some(format),
+            dimension: Some(wgpu::TextureViewDimension::D2),
+            usage: Some(texture_raw.usage()),
+            aspect: wgpu::TextureAspect::All,
+            base_mip_level: 0,
+            mip_level_count: None,
+            base_array_layer: 0,
+            array_layer_count: None,
+        });
+
+        let texture_list = &mut self.storage[texture_kind];
+
+        let index = texture_list.free_list.pop();
+
+        let atlas_texture = WgpuAtlasTexture {
+            id: AtlasTextureId {
+                kind: texture_kind,
+                index: index.unwrap_or(texture_list.textures.len()) as u32,
+            },
+            allocator: BucketedAtlasAllocator::new(size.into()),
+            raw: texture_raw,
+            raw_view: texture_raw_view,
+            format,
+            live_atlas_keys: 0,
+        };
+
+        self.initializations.push(atlas_texture.id);
+
+        // TODO(mdeand): This is weird
+        match index {
+            Some(index) => {
+                texture_list.textures[index] = Some(atlas_texture);
+                texture_list
+                    .textures
+                    .get_mut(index)
+                    .unwrap()
+                    .as_mut()
+                    .unwrap()
+            }
+            None => {
+                texture_list.textures.push(Some(atlas_texture));
+                texture_list.textures.last_mut().unwrap().as_mut().unwrap()
+            }
+        }
     }
 
     fn upload_texture(
@@ -139,10 +226,30 @@ impl WgpuAtlasState {
         bounds: Bounds<DevicePixels>,
         bytes: &[u8],
     ) {
-        todo!()
+        // TODO(mdeand): Use StagingBelt
+
+        let buffer = self
+            .context
+            .device
+            .create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: None,
+                usage: wgpu::BufferUsages::COPY_SRC,
+                contents: bytes,
+            });
+
+        // TODO(mdeand): We're using offsets (temporarily) given BufferSlices require a lifetime.
+
+        self.uploads.push(PendingUpload {
+            texture_id,
+            bounds,
+            buffer,
+            offset: 0,
+        })
     }
 
-    fn flush_initializations(&mut self, encoder: &mut wgpu::CommandEncoder) {}
+    fn flush_initializations(&mut self, _encoder: &mut wgpu::CommandEncoder) {
+        // TODO(mdeand): Does this function even need to exist?
+    }
 
     fn flush(&mut self, encoder: &mut wgpu::CommandEncoder) {
         self.flush_initializations(encoder);
@@ -191,6 +298,24 @@ struct WgpuAtlasTexture {
 }
 
 impl WgpuAtlasTexture {
+    fn allocate(&mut self, size: Size<DevicePixels>) -> Option<AtlasTile> {
+        let allocation = self.allocator.allocate(size.into())?;
+
+        let tile = AtlasTile {
+            texture_id: self.id,
+            tile_id: allocation.id.into(),
+            padding: 0,
+            bounds: Bounds {
+                origin: allocation.rectangle.min.into(),
+                size,
+            },
+        };
+
+        self.live_atlas_keys += 1;
+
+        Some(tile)
+    }
+
     fn bytes_per_pixel(&self) -> u8 {
         // TODO(mdeand): There's probably a better way to do this
 
@@ -261,4 +386,37 @@ struct PendingUpload {
     bounds: Bounds<DevicePixels>,
     buffer: wgpu::Buffer,
     offset: u64,
+}
+
+impl From<Size<DevicePixels>> for etagere::Size {
+    fn from(size: Size<DevicePixels>) -> Self {
+        etagere::Size::new(size.width.into(), size.height.into())
+    }
+}
+
+impl From<etagere::Point> for Point<DevicePixels> {
+    fn from(value: etagere::Point) -> Self {
+        Point {
+            x: DevicePixels::from(value.x),
+            y: DevicePixels::from(value.y),
+        }
+    }
+}
+
+impl From<etagere::Size> for Size<DevicePixels> {
+    fn from(size: etagere::Size) -> Self {
+        Size {
+            width: DevicePixels::from(size.width),
+            height: DevicePixels::from(size.height),
+        }
+    }
+}
+
+impl From<etagere::Rectangle> for Bounds<DevicePixels> {
+    fn from(rectangle: etagere::Rectangle) -> Self {
+        Bounds {
+            origin: rectangle.min.into(),
+            size: rectangle.size().into(),
+        }
+    }
 }
