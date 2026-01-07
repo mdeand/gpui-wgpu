@@ -73,6 +73,8 @@
           shellHook = ''
             export WAYLAND_DISPLAY=''${WAYLAND_DISPLAY:-wayland-0}
             export XDG_RUNTIME_DIR=''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+            export VK_LAYER_PATH="${pkgs.renderdoc}/lib:${pkgs.renderdoc}/lib64:${pkgs.renderdoc}/share/vulkan/implicit_layer.d:$VK_LAYER_PATH"
+            export VK_INSTANCE_LAYERS="VK_LAYER_RENDERDOC_Capture:$VK_INSTANCE_LAYERS"
           '';
 
           nativeBuildInputs =
@@ -85,6 +87,10 @@
               cargo
               clippy
               rust-analyzer
+              vulkan-tools
+              vulkan-loader
+              vulkan-validation-layers
+              renderdoc
             ]
             ++ buildInputs
             ++ nativeBuildInputs;

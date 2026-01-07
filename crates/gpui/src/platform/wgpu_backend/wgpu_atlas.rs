@@ -11,10 +11,6 @@ use crate::{
     platform::{AtlasTextureList, wgpu_backend::WgpuContext},
 };
 
-pub struct BladeTextureInfo {
-    pub raw_view: wgpu::TextureView,
-}
-
 pub(crate) struct WgpuAtlas(Mutex<WgpuAtlasState>);
 
 impl WgpuAtlas {
@@ -38,10 +34,13 @@ impl WgpuAtlas {
         // TODO(mdeand): Is this even necessary?
     }
 
-    pub fn get_texture_info(&self, texture_id: AtlasTextureId) -> WgpuTextureInfo {
+    pub(crate) fn get_texture_info(&self, texture_id: AtlasTextureId) -> WgpuTextureInfo {
         let state = self.0.lock();
+        let texture = &state.storage[texture_id];
 
-        todo!()
+        WgpuTextureInfo {
+            raw_view: texture.raw_view.clone(),
+        }
     }
 }
 
@@ -94,6 +93,7 @@ impl PlatformAtlas for WgpuAtlas {
                     .free_list
                     .push(texture.id.index as usize);
 
+                // TODO(mdeand): Is this even necessary?
                 texture.destroy(&atlas.context);
             } else {
                 *texture_slot = Some(texture);
@@ -117,7 +117,11 @@ impl WgpuAtlasState {
         {
             let textures = &mut self.storage[texture_kind];
 
-            if let Some(tile) = textures.iter_mut().rev().find_map(|x| x.allocate(size)) {
+            if let Some(tile) = textures
+                .iter_mut()
+                .rev()
+                .find_map(|texture| texture.allocate(size))
+            {
                 return tile;
             }
         }
@@ -144,12 +148,16 @@ impl WgpuAtlasState {
             AtlasTextureKind::Monochrome => (
                 wgpu::TextureFormat::R8Unorm,
                 // TODO(mdeand): Consider usages
-                wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST,
+                wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::COPY_DST
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
             ),
             AtlasTextureKind::Polychrome => (
                 wgpu::TextureFormat::Rgba8Unorm,
                 // TODO(mdeand): Consider usages
-                wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST,
+                wgpu::TextureUsages::COPY_SRC
+                    | wgpu::TextureUsages::COPY_DST
+                    | wgpu::TextureUsages::TEXTURE_BINDING,
             ),
         };
 
@@ -288,7 +296,7 @@ impl WgpuAtlasState {
     }
 }
 
-struct WgpuAtlasTexture {
+pub(crate) struct WgpuAtlasTexture {
     id: AtlasTextureId,
     allocator: BucketedAtlasAllocator,
     raw: wgpu::Texture,
@@ -377,7 +385,7 @@ struct WgpuAtlasStorage {
     polychrome_textures: AtlasTextureList<WgpuAtlasTexture>,
 }
 
-struct WgpuTextureInfo {
+pub(crate) struct WgpuTextureInfo {
     pub raw_view: wgpu::TextureView,
 }
 

@@ -1,4 +1,7 @@
-use crate::{Capslock, ResultExt as _, RunnableVariant, TaskTiming, profiler, xcb_flush};
+use crate::{
+    Capslock, ResultExt as _, RunnableVariant, TaskTiming, platform::wgpu_backend::WgpuContext,
+    profiler, xcb_flush,
+};
 use anyhow::{Context as _, anyhow};
 use ashpd::WindowIdentifier;
 use calloop::{
@@ -16,6 +19,7 @@ use std::{
     ops::Deref,
     path::PathBuf,
     rc::{Rc, Weak},
+    sync::Arc,
     time::{Duration, Instant},
 };
 use util::ResultExt as _;
@@ -177,7 +181,7 @@ pub struct X11ClientState {
     pub(crate) last_location: Point<Pixels>,
     pub(crate) current_count: usize,
 
-    gpu_context: BladeContext,
+    gpu_context: Arc<WgpuContext>,
 
     pub(crate) scale_factor: f32,
 
@@ -437,7 +441,7 @@ impl X11Client {
             .to_string();
         let keyboard_layout = LinuxKeyboardLayout::new(layout_name.into());
 
-        let gpu_context = BladeContext::new().notify_err("Unable to init GPU context");
+        let gpu_context = Arc::new(WgpuContext::new().notify_err("Unable to init GPU context"));
 
         let resource_database = x11rb::resource_manager::new_from_default(&xcb_connection)
             .context("Failed to create resource database")?;
@@ -1488,7 +1492,7 @@ impl LinuxClient for X11Client {
             handle,
             X11ClientStatePtr(Rc::downgrade(&self.0)),
             state.common.foreground_executor.clone(),
-            &state.gpu_context,
+            state.gpu_context.clone(),
             params,
             &state.xcb_connection,
             state.client_side_decorations_supported,
