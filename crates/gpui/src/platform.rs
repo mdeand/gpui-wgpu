@@ -2,6 +2,8 @@ mod app_menu;
 mod keyboard;
 mod keystroke;
 mod wgpu_backend;
+mod winit;
+mod cross;
 
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 mod linux;

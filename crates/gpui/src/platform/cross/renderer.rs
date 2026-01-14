@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use crate::{
     AtlasTextureId, AtlasTile, DevicePixels, GpuSpecs, Hsla, LinearColorStop, MonochromeSprite,
-    PlatformAtlas, PrimitiveBatch, Quad, ScaledPixels, Scene, TileId, TransformationMatrix, color,
+    PlatformAtlas, PrimitiveBatch, Quad, ScaledPixels, Scene, TransformationMatrix, color,
     geometry,
-    platform::wgpu_backend::{WgpuAtlas, WgpuContext},
+    platform::cross::{atlas::WgpuAtlas, render_context::WgpuContext},
 };
 
 const fn map_attributes<const N: usize>(
@@ -1169,7 +1169,7 @@ impl WgpuRenderer {
 
         let surface_configuration = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-            format: surface.get_capabilities(&context.adapter).formats[0],
+            format: dbg!(surface.get_capabilities(&context.adapter)).formats[0],
             width,
             height,
             present_mode: wgpu::PresentMode::Fifo,
@@ -1199,7 +1199,7 @@ impl WgpuRenderer {
         })
     }
 
-    pub fn draw(&mut self, scene: &Scene) {
+    pub fn draw(&self, scene: &Scene) {
         let mut command_encoder =
             self.context
                 .device

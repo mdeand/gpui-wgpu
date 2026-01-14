@@ -17,7 +17,7 @@ pub struct WgpuContext {
 impl WgpuContext {
     pub fn new() -> anyhow::Result<Self> {
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
+            backends: wgpu::Backends::DX12,
             ..Default::default()
         });
 
@@ -25,13 +25,15 @@ impl WgpuContext {
             power_preference: wgpu::PowerPreference::HighPerformance,
             compatible_surface: None,
             force_fallback_adapter: false,
-        }))?;
+        }))?; 
+
+        println!("Adapter Info: {:?}", adapter.get_info());
 
         let (device, queue) =
             pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
                 label: None,
-                required_features: wgpu::Features::BUFFER_BINDING_ARRAY
-                    | wgpu::Features::STORAGE_RESOURCE_BINDING_ARRAY
+                required_features: /*wgpu::Features::BUFFER_BINDING_ARRAY
+                    |*/ wgpu::Features::STORAGE_RESOURCE_BINDING_ARRAY
                     | wgpu::Features::TEXTURE_BINDING_ARRAY,
                 required_limits: wgpu::Limits {
                     max_texture_dimension_1d: 2048, // *
