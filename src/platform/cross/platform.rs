@@ -37,6 +37,7 @@ pub(crate) struct CrossPlatform {
     wgpu_context: Arc<WgpuContext>,
     main_rx: PriorityQueueReceiver<RunnableVariant>,
     event_loop: Cell<Option<winit::event_loop::EventLoop<CrossEvent>>>,
+    event_loop_proxy: winit::event_loop::EventLoopProxy<CrossEvent>,
     callbacks: PlatformCallbacks,
 }
 
@@ -85,6 +86,7 @@ impl CrossPlatform {
             wgpu_context: Arc::new(WgpuContext::new()?),
             main_rx,
             event_loop: Cell::new(Some(event_loop)),
+            event_loop_proxy,
             callbacks: PlatformCallbacks::default(),
         })
     }
@@ -172,7 +174,7 @@ impl Platform for CrossPlatform {
         _handle: crate::AnyWindowHandle,
         options: crate::WindowParams,
     ) -> anyhow::Result<Box<dyn crate::PlatformWindow>> {
-        let window = CrossWindow::new(self.wgpu_context.clone());
+        let window = CrossWindow::new(self.wgpu_context.clone(), self.event_loop_proxy.clone());
 
         let success = with_active_context(|event_loop, app_state| {
             let bounds = options.bounds;
@@ -388,6 +390,11 @@ impl winit::application::ApplicationHandler<CrossEvent> for AppState {
         match event {
             CrossEvent::WakeUp => {
                 self.drain_main_queue();
+            }
+            CrossEvent::SurfacePresent(window_id) => {
+                if let Some(window) = self.windows.get(&window_id) {
+                    window.window().request_redraw();
+                }
             }
         }
 

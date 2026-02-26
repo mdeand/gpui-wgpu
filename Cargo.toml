@@ -346,6 +346,10 @@ path = "examples/learn/animation.rs"
 name = "text"
 path = "examples/learn/text.rs"
 
+[[example]]
+name = "wgpu_surface"
+path = "examples/learn/wgpu_surface.rs"
+
 # ============================================================================
 # Bench Examples - Performance benchmarks
 # ============================================================================

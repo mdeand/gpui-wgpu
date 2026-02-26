@@ -1,3 +1,7 @@
+use std::sync::Arc;
+
+use super::surface_registry::SurfaceRegistry;
+
 pub struct WgpuContext {
     pub(super) adapter: wgpu::Adapter,
     pub(super) device: wgpu::Device,
@@ -11,6 +15,8 @@ pub struct WgpuContext {
     pub(super) mono_sprites_buffer: wgpu::Buffer,
     pub(super) poly_sprites_buffer: wgpu::Buffer,
     pub(super) color_adjustments_buffer: wgpu::Buffer,
+
+    pub(crate) surface_registry: Arc<SurfaceRegistry>,
 }
 
 impl WgpuContext {
@@ -111,6 +117,8 @@ impl WgpuContext {
             mono_sprites_buffer,
             poly_sprites_buffer,
             color_adjustments_buffer,
+
+            surface_registry: Arc::new(SurfaceRegistry::new()),
         })
     }
 }

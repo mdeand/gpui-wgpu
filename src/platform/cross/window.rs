@@ -1,21 +1,28 @@
 use crate::{
     Bounds, Capslock, Modifiers, Pixels, PlatformInputHandler, PlatformWindow, Point, Size,
-    WindowAppearance, WindowBackgroundAppearance, WindowBounds,
-    platform::cross::{atlas::WgpuAtlas, render_context::WgpuContext, renderer::WgpuRenderer},
+    WgpuSurfaceHandle, WindowAppearance, WindowBackgroundAppearance, WindowBounds,
+    platform::cross::{
+        atlas::WgpuAtlas,
+        dispatcher::CrossEvent,
+        render_context::WgpuContext,
+        renderer::WgpuRenderer,
+    },
 };
 use std::{
     cell::{Cell, OnceCell, RefCell},
     sync::Arc,
 };
+use winit::event_loop::EventLoopProxy;
 
 #[derive(Clone)]
 pub struct CrossWindow(pub(crate) Arc<CrossWindowInner>);
 
 pub(crate) struct CrossWindowInner {
-    pub(crate) winit_window: OnceCell<winit::window::Window>,
+    pub(crate) winit_window: OnceCell<Arc<winit::window::Window>>,
     pub(crate) renderer: OnceCell<RefCell<WgpuRenderer>>,
     pub(crate) wgpu_context: Arc<WgpuContext>,
     pub(crate) sprite_atlas: Arc<WgpuAtlas>,
+    pub(crate) event_loop_proxy: EventLoopProxy<CrossEvent>,
     pub(crate) state: CrossWindowState,
 }
 
@@ -58,12 +65,16 @@ impl Callbacks {
 }
 
 impl CrossWindow {
-    pub(crate) fn new(wgpu_context: Arc<WgpuContext>) -> Self {
+    pub(crate) fn new(
+        wgpu_context: Arc<WgpuContext>,
+        event_loop_proxy: EventLoopProxy<CrossEvent>,
+    ) -> Self {
         Self(Arc::new(CrossWindowInner {
             winit_window: OnceCell::new(),
             wgpu_context: wgpu_context.clone(),
             renderer: OnceCell::new(),
             sprite_atlas: Arc::new(WgpuAtlas::new(wgpu_context.clone())),
+            event_loop_proxy,
             state: CrossWindowState::default(),
         }))
     }
@@ -73,7 +84,7 @@ impl CrossWindow {
 
         self.0
             .winit_window
-            .set(winit_window)
+            .set(Arc::new(winit_window))
             .expect("winit_window already initialized");
 
         if initial_size.width > 0 && initial_size.height > 0 {
@@ -93,7 +104,8 @@ impl CrossWindow {
     }
 
     pub(crate) fn window(&self) -> &winit::window::Window {
-        self.0
+        &*self
+            .0
             .winit_window
             .get()
             .expect("winit_window should be initialized")
@@ -315,6 +327,49 @@ impl PlatformWindow for CrossWindow {
         if let Some(renderer) = self.0.renderer.get() {
             renderer.borrow().draw(scene);
         }
+    }
+
+    fn create_wgpu_surface(
+        &self,
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+    ) -> Option<WgpuSurfaceHandle> {
+        let ctx = &self.0.wgpu_context;
+        let registry = ctx.surface_registry.clone();
+        let surface_id = registry.create(&ctx.device, width, height, format);
+
+        // Build the present trigger: sends a CrossEvent to wake the event loop
+        // and request a redraw for this window.
+        let proxy = self.0.event_loop_proxy.clone();
+        let window_id = self
+            .0
+            .winit_window
+            .get()
+            .map(|w| w.id());
+        let present_trigger: Arc<dyn Fn() + Send + Sync> = Arc::new(move || {
+            if let Some(wid) = window_id {
+                let _ = proxy.send_event(CrossEvent::SurfacePresent(wid));
+            }
+        });
+
+        // capture winit window Arc so handle can request redraw directly
+        let winit_arc = self
+            .0
+            .winit_window
+            .get()
+            .cloned();
+        Some(WgpuSurfaceHandle::new(
+            ctx.device.clone(),
+            ctx.queue.clone(),
+            surface_id,
+            registry,
+            present_trigger,
+            winit_arc,
+            width,
+            height,
+            format,
+        ))
     }
 
     fn sprite_atlas(&self) -> std::sync::Arc<dyn crate::PlatformAtlas> {

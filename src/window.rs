@@ -3268,12 +3268,12 @@ impl Window {
         Ok(())
     }
 
-    /// Paint a surface into the scene for the next frame at the current z-index.
+    /// Paint a macOS CoreVideo surface into the scene for the next frame at the current z-index.
     ///
     /// This method should only be called as part of the paint phase of element drawing.
     #[cfg(target_os = "macos")]
     pub fn paint_surface(&mut self, bounds: Bounds<Pixels>, image_buffer: CVPixelBuffer) {
-        use crate::PaintSurface;
+        use crate::{PaintSurface, scene::SurfaceContent};
 
         self.invalidator.debug_assert_paint();
 
@@ -3284,8 +3284,50 @@ impl Window {
             order: 0,
             bounds,
             content_mask,
-            image_buffer,
+            content: SurfaceContent::CoreVideo(image_buffer),
         });
+    }
+
+    /// Paint a WGPU surface into the scene for the next frame at the current z-index.
+    /// The renderer will look up the front buffer texture from the `SurfaceRegistry`
+    /// using the given `SurfaceId`.
+    ///
+    /// This method should only be called as part of the paint phase of element drawing.
+    pub fn paint_wgpu_surface(
+        &mut self,
+        bounds: Bounds<Pixels>,
+        surface_id: crate::platform::cross::surface_registry::SurfaceId,
+    ) {
+        use crate::{PaintSurface, scene::SurfaceContent};
+
+        self.invalidator.debug_assert_paint();
+
+        if !std::env::var("GPUI_BENCHMARK").is_ok() {
+            let scale_factor = self.scale_factor();
+            let bounds = bounds.scale(scale_factor);
+            let content_mask = self.content_mask().scale(scale_factor);
+            self.next_frame.scene.insert_primitive(PaintSurface {
+                order: 0,
+                bounds,
+                content_mask,
+                content: SurfaceContent::Wgpu(surface_id),
+            });
+        }
+    }
+
+    /// Create a double-buffered WGPU surface handle for external GPU rendering.
+    ///
+    /// Returns `None` on platforms that don't use the WGPU renderer.
+    /// The returned handle provides `device()` / `queue()` access and a
+    /// `back_buffer_view()` you can render into, then call `present()` to
+    /// swap buffers and trigger a re-composite (no layout/paint cycle).
+    pub fn create_wgpu_surface(
+        &self,
+        width: u32,
+        height: u32,
+        format: wgpu::TextureFormat,
+    ) -> Option<crate::WgpuSurfaceHandle> {
+        self.platform_window.create_wgpu_surface(width, height, format)
     }
 
     /// Removes an image from the sprite atlas.

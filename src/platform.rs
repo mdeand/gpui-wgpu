@@ -23,7 +23,7 @@ mod test;
 // #[cfg(target_os = "windows")]
 // mod windows;
 
-mod cross;
+pub(crate) mod cross;
 
 #[cfg(all(
     feature = "screen-capture",
@@ -523,6 +523,17 @@ pub(crate) trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
     fn gpu_specs(&self) -> Option<GpuSpecs>;
 
     fn update_ime_position(&self, _bounds: Bounds<Pixels>);
+
+    /// Create a double-buffered WGPU surface handle for external rendering.
+    /// Returns `None` on platforms that don't use the WGPU renderer.
+    fn create_wgpu_surface(
+        &self,
+        _width: u32,
+        _height: u32,
+        _format: wgpu::TextureFormat,
+    ) -> Option<crate::WgpuSurfaceHandle> {
+        None
+    }
 
     #[cfg(any(test, feature = "test-support"))]
     fn as_test(&mut self) -> Option<&mut TestWindow> {

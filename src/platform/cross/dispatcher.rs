@@ -8,6 +8,7 @@ use winit::event_loop::EventLoopProxy;
 
 pub enum CrossEvent {
     WakeUp,
+    SurfacePresent(winit::window::WindowId),
 }
 
 pub struct Dispatcher {
