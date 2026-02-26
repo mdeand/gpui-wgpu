@@ -3294,7 +3294,8 @@ impl Window {
         height: u32,
         format: wgpu::TextureFormat,
     ) -> Option<crate::WgpuSurfaceHandle> {
-        self.platform_window.create_wgpu_surface(width, height, format)
+        self.platform_window
+            .create_wgpu_surface(width, height, format)
     }
 
     /// Removes an image from the sprite atlas.
