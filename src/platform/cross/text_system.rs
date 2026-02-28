@@ -6,8 +6,8 @@ use crate::{
 use anyhow::{Context as _, Ok, Result};
 use collections::HashMap;
 use cosmic_text::{
-    Attrs, AttrsList, CacheKey, Family, Font as CosmicTextFont, FontFeatures as CosmicFontFeatures,
-    FontSystem, ShapeBuffer, ShapeLine, SwashCache,
+    Attrs, AttrsList, CacheKey, Ellipsize, Family, Font as CosmicTextFont,
+    FontFeatures as CosmicFontFeatures, FontSystem, Hinting, ShapeBuffer, ShapeLine, SwashCache,
 };
 use itertools::Itertools;
 use parking_lot::RwLock;
@@ -45,6 +45,7 @@ struct CosmicTextSystemState {
 
 struct LoadedFont {
     font: Arc<CosmicTextFont>,
+    weight: cosmic_text::fontdb::Weight,
     features: CosmicFontFeatures,
     is_known_emoji_font: bool,
 }
@@ -219,14 +220,14 @@ impl CosmicTextSystemState {
             .db()
             .faces()
             .filter(|face| face.families.iter().any(|family| *name == family.0))
-            .map(|face| (face.id, face.post_script_name.clone()))
+            .map(|face| (face.id, face.post_script_name.clone(), face.weight))
             .collect::<SmallVec<[_; 4]>>();
 
         let mut loaded_font_ids = SmallVec::new();
-        for (font_id, postscript_name) in families {
+        for (font_id, postscript_name, weight) in families {
             let font = self
                 .font_system
-                .get_font(font_id)
+                .get_font(font_id, weight)
                 .context("Could not load font")?;
 
             // HACK: To let the storybook run and render Windows caption icons. We should actually do better font fallback.
@@ -246,6 +247,7 @@ impl CosmicTextSystemState {
             loaded_font_ids.push(font_id);
             self.loaded_fonts.push(LoadedFont {
                 font,
+                weight,
                 features: features.try_into()?,
                 is_known_emoji_font: check_is_known_emoji_font(&postscript_name),
             });
@@ -272,7 +274,9 @@ impl CosmicTextSystemState {
     }
 
     fn raster_bounds(&mut self, params: &RenderGlyphParams) -> Result<Bounds<DevicePixels>> {
-        let font = &self.loaded_fonts[params.font_id.0].font;
+        let loaded_font = &self.loaded_fonts[params.font_id.0];
+        let font = &loaded_font.font;
+        let weight = loaded_font.weight;
         let subpixel_shift = point(
             params.subpixel_variant.x as f32 / SUBPIXEL_VARIANTS_X as f32 / params.scale_factor,
             params.subpixel_variant.y as f32 / SUBPIXEL_VARIANTS_Y as f32 / params.scale_factor,
@@ -286,6 +290,7 @@ impl CosmicTextSystemState {
                     params.glyph_id.0 as u16,
                     (params.font_size * params.scale_factor).into(),
                     (subpixel_shift.x, subpixel_shift.y.trunc()),
+                    weight,
                     cosmic_text::CacheKeyFlags::empty(),
                 )
                 .0,
@@ -308,7 +313,9 @@ impl CosmicTextSystemState {
             anyhow::bail!("glyph bounds are empty");
         } else {
             let bitmap_size = glyph_bounds.size;
-            let font = &self.loaded_fonts[params.font_id.0].font;
+            let loaded_font = &self.loaded_fonts[params.font_id.0];
+            let font = &loaded_font.font;
+            let weight = loaded_font.weight;
             let subpixel_shift = point(
                 params.subpixel_variant.x as f32 / SUBPIXEL_VARIANTS_X as f32 / params.scale_factor,
                 params.subpixel_variant.y as f32 / SUBPIXEL_VARIANTS_Y as f32 / params.scale_factor,
@@ -322,6 +329,7 @@ impl CosmicTextSystemState {
                         params.glyph_id.0 as u16,
                         (params.font_size * params.scale_factor).into(),
                         (subpixel_shift.x, subpixel_shift.y.trunc()),
+                        weight,
                         cosmic_text::CacheKeyFlags::empty(),
                     )
                     .0,
@@ -356,14 +364,17 @@ impl CosmicTextSystemState {
         {
             FontId(ix)
         } else {
-            let font = self.font_system.get_font(id).unwrap();
             let face = self.font_system.db().face(id).unwrap();
+            let weight = face.weight;
+            let postscript_name = face.post_script_name.clone();
+            let font = self.font_system.get_font(id, weight).unwrap();
 
             let font_id = FontId(self.loaded_fonts.len());
             self.loaded_fonts.push(LoadedFont {
                 font,
+                weight,
                 features: CosmicFontFeatures::new(),
-                is_known_emoji_font: check_is_known_emoji_font(&face.post_script_name),
+                is_known_emoji_font: check_is_known_emoji_font(&postscript_name),
             });
 
             font_id
@@ -404,9 +415,11 @@ impl CosmicTextSystemState {
             font_size.0,
             None, // We do our own wrapping
             cosmic_text::Wrap::None,
+            Ellipsize::None,
             None,
             &mut layout_lines,
             None,
+            Hinting::default(),
         );
         let layout = layout_lines.first().unwrap();
 

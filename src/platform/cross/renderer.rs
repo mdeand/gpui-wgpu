@@ -732,7 +732,7 @@ impl WgpuPipelines {
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("quads_pipeline_layout"),
                     bind_group_layouts: &[&globals_bind_group_layout, &quads_bind_group_layout],
-                    push_constant_ranges: &[],
+                    immediate_size: 0,
                 });
 
         let shadows_bind_group_layout =
@@ -758,7 +758,7 @@ impl WgpuPipelines {
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("shadows_pipeline_layout"),
                     bind_group_layouts: &[&globals_bind_group_layout, &shadows_bind_group_layout],
-                    push_constant_ranges: &[],
+                    immediate_size: 0,
                 });
 
         let underlines_bind_group_layout =
@@ -787,7 +787,7 @@ impl WgpuPipelines {
                         &globals_bind_group_layout,
                         &underlines_bind_group_layout,
                     ],
-                    push_constant_ranges: &[],
+                    immediate_size: 0,
                 });
 
         let mono_sprites_bind_group_layout =
@@ -818,7 +818,7 @@ impl WgpuPipelines {
                         &sprites_bind_group_layout,
                         &mono_sprites_bind_group_layout,
                     ],
-                    push_constant_ranges: &[],
+                    immediate_size: 0,
                 });
 
         let poly_sprites_bind_group_layout =
@@ -848,18 +848,15 @@ impl WgpuPipelines {
                         &sprites_bind_group_layout,
                         &poly_sprites_bind_group_layout,
                     ],
-                    push_constant_ranges: &[],
+                    immediate_size: 0,
                 });
 
-        let surfaces_shader =
-            context
-                .device
-                .create_shader_module(wgpu::ShaderModuleDescriptor {
-                    label: Some("surfaces_shader"),
-                    source: wgpu::ShaderSource::Wgsl(
-                        include_str!("shaders/surfaces.wgsl").into(),
-                    ),
-                });
+        let surfaces_shader = context
+            .device
+            .create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("surfaces_shader"),
+                source: wgpu::ShaderSource::Wgsl(include_str!("shaders/surfaces.wgsl").into()),
+            });
 
         let surfaces_bind_group_layout =
             context
@@ -901,11 +898,8 @@ impl WgpuPipelines {
                 .device
                 .create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                     label: Some("surfaces_pipeline_layout"),
-                    bind_group_layouts: &[
-                        &globals_bind_group_layout,
-                        &surfaces_bind_group_layout,
-                    ],
-                    push_constant_ranges: &[],
+                    bind_group_layouts: &[&globals_bind_group_layout, &surfaces_bind_group_layout],
+                    immediate_size: 0,
                 });
 
         let globals_bind_group = context
@@ -974,7 +968,7 @@ impl WgpuPipelines {
                         compilation_options: wgpu::PipelineCompilationOptions::default(),
                         targets: color_targets,
                     }),
-                    multiview: None,
+                    multiview_mask: None,
                     cache: None,
                 },
             ),
@@ -1001,7 +995,7 @@ impl WgpuPipelines {
                         compilation_options: wgpu::PipelineCompilationOptions::default(),
                         targets: color_targets,
                     }),
-                    multiview: None,
+                    multiview_mask: None,
                     cache: None,
                 },
             ),
@@ -1028,7 +1022,7 @@ impl WgpuPipelines {
                         compilation_options: wgpu::PipelineCompilationOptions::default(),
                         targets: color_targets,
                     }),
-                    multiview: None,
+                    multiview_mask: None,
                     cache: None,
                 },
             ),
@@ -1055,7 +1049,7 @@ impl WgpuPipelines {
                         targets: color_targets,
                     }),
                     multisample: wgpu::MultisampleState::default(),
-                    multiview: None,
+                    multiview_mask: None,
                     cache: None,
                 },
             ),
@@ -1082,7 +1076,7 @@ impl WgpuPipelines {
                         targets: color_targets,
                     }),
                     multisample: wgpu::MultisampleState::default(),
-                    multiview: None,
+                    multiview_mask: None,
                     cache: None,
                 },
             ),
@@ -1111,7 +1105,7 @@ impl WgpuPipelines {
                         targets: color_targets,
                     }),
                     multisample: wgpu::MultisampleState::default(),
-                    multiview: None,
+                    multiview_mask: None,
                     cache: None,
                 },
             ),
@@ -1168,7 +1162,8 @@ pub struct WgpuRenderer {
     rendering_parameters: RenderingParameters,
 
     // cache bind groups for each double-buffered surface (index 0/1)
-    surface_bind_groups: Mutex<HashMap<crate::platform::cross::surface_registry::SurfaceId, [wgpu::BindGroup; 2]>>,
+    surface_bind_groups:
+        Mutex<HashMap<crate::platform::cross::surface_registry::SurfaceId, [wgpu::BindGroup; 2]>>,
 }
 
 impl WgpuRenderer {
@@ -1296,7 +1291,8 @@ impl WgpuRenderer {
         self.atlas.before_frame(&mut command_encoder);
 
         // keep track of which surface ids we rendered this frame
-        let mut seen_surfaces: Vec<crate::platform::cross::surface_registry::SurfaceId> = Vec::new();
+        let mut seen_surfaces: Vec<crate::platform::cross::surface_registry::SurfaceId> =
+            Vec::new();
 
         let color_adjustments = ColorAdjustments {
             gamma_ratios: self.rendering_parameters.gamma_ratios,
@@ -1474,6 +1470,7 @@ impl WgpuRenderer {
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
 
             let mut quads_first_instance: u32 = 0;
