@@ -1730,8 +1730,6 @@ impl WgpuRenderer {
         self.surface_configuration.height = size.height.0 as u32;
         self.surface
             .configure(&self.context.device, &self.surface_configuration);
-
-        // todo!()
     }
 
     pub fn sprite_atlas(&self) -> Arc<dyn PlatformAtlas> {
@@ -1739,11 +1737,12 @@ impl WgpuRenderer {
     }
 
     pub fn gpu_specs(&self) -> GpuSpecs {
+        let info = self.context.adapter.get_info();
         GpuSpecs {
-            is_software_emulated: false,
-            device_name: "gpu 9000".to_owned(),
-            driver_name: "gpu 9000 driver".to_owned(),
-            driver_info: "gpu 9000 driver info".to_owned(),
+            is_software_emulated: info.device_type == wgpu::DeviceType::Cpu,
+            device_name: info.name,
+            driver_name: info.driver,
+            driver_info: info.driver_info,
         }
     }
 
@@ -1757,21 +1756,12 @@ impl WgpuRenderer {
         };
         self.surface
             .configure(&self.context.device, &self.surface_configuration);
-
-        // todo!()
     }
 
-    pub fn destroy(&mut self) {
-        println!("WgpuRenderer destroyed");
-        // TODO(mdeand): Implement proper destruction logic.
-    }
-
-    pub fn viewport_size(&self) -> wgpu::Extent3d {
-        // TODO(mdeand): Hack
-        wgpu::Extent3d {
-            width: 500,
-            height: 500,
-            depth_or_array_layers: 1,
+    pub fn viewport_size(&self) -> geometry::Size<DevicePixels> {
+        geometry::Size {
+            width: DevicePixels(self.surface_configuration.width as i32),
+            height: DevicePixels(self.surface_configuration.height as i32),
         }
     }
 }
