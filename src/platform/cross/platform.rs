@@ -380,6 +380,9 @@ impl winit::application::ApplicationHandler<CrossEvent> for AppState {
         match event {
             CrossEvent::WakeUp => {
                 self.drain_main_queue();
+                for window in self.windows.values() {
+                    window.window().request_redraw();
+                }
             }
             CrossEvent::SurfacePresent(window_id) => {
                 if let Some(window) = self.windows.get(&window_id) {
