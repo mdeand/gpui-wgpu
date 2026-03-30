@@ -451,6 +451,11 @@ pub trait PlatformDispatcher: Send + Sync {
     fn dispatch_after(&self, duration: Duration, runnable: RunnableVariant);
     fn spawn_realtime(&self, priority: RealtimePriority, f: Box<dyn FnOnce() + Send>);
 
+    /// Wake the main event loop. Used by external threads (e.g. a tokio watch
+    /// channel watcher) to signal that there is new data to render. The default
+    /// implementation is a no-op for platforms that don't need it.
+    fn wakeup(&self) {}
+
     fn now(&self) -> Instant {
         Instant::now()
     }

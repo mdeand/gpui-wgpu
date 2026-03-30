@@ -33,6 +33,15 @@ pub struct BackgroundExecutor {
     pub dispatcher: Arc<dyn PlatformDispatcher>,
 }
 
+impl BackgroundExecutor {
+    /// Wake the main event loop. Call this from a background thread (e.g. a
+    /// tokio task) when external data has changed and a new frame should be
+    /// rendered. This is a no-op on platforms that don't support it.
+    pub fn wake(&self) {
+        self.dispatcher.wakeup();
+    }
+}
+
 /// A pointer to the executor that is currently running,
 /// for spawning tasks on the main thread.
 ///

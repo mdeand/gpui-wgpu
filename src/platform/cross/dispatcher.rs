@@ -94,6 +94,10 @@ impl PlatformDispatcher for Dispatcher {
         }
     }
 
+    fn wakeup(&self) {
+        let _ = self.proxy.send_event(CrossEvent::WakeUp);
+    }
+
     fn spawn_realtime(&self, _priority: RealtimePriority, f: Box<dyn FnOnce() + Send>) {
         // TODO(mdeand): There's a crate (thread-priority) that implements thread
         // TODO(mdeand): priorities, but I don't want to add it right now.
