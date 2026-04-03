@@ -739,6 +739,15 @@ impl winit::application::ApplicationHandler<CrossEvent> for AppState {
             _ => (),
         }
 
+        // Any window event may dirty the window via cx.notify().
+        // Under ControlFlow::Wait, redraws only happen when explicitly
+        // requested, so we must request one here. The on_request_frame
+        // handler checks invalidator.is_dirty() before doing real work,
+        // so this is a no-op when nothing actually changed.
+        if let Some(window) = self.windows.get(&window_id) {
+            window.window().request_redraw();
+        }
+
         self.clear_active_context();
     }
 }
