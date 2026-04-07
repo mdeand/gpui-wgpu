@@ -75,6 +75,7 @@ impl SurfaceRegistry {
     }
 
     /// Get the front buffer's `TextureView` (what the renderer reads from).
+    #[allow(dead_code)]
     pub fn front_view(&self, id: SurfaceId) -> Option<wgpu::TextureView> {
         // clone an already-created view instead of making a new one every frame.
         let surfaces = self.surfaces.lock().unwrap();

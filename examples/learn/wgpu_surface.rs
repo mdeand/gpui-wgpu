@@ -36,7 +36,7 @@ struct SurfaceExample {
 }
 
 impl Render for SurfaceExample {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, _cx: &mut Context<Self>) -> impl IntoElement {
         // pull any pending fps samples from channel
         while let Ok(f) = self.fps_rx.try_recv() {
             self.display_fps = f;
@@ -323,7 +323,7 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
                                     usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
                                     view_formats: &[],
                                 });
-                                let depth_view = depth_tex.create_view(&wgpu::TextureViewDescriptor::default());
+                                let _depth_view = depth_tex.create_view(&wgpu::TextureViewDescriptor::default());
 
                                 let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
                                     label: Some("CubeUniformBuf"),

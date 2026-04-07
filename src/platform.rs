@@ -782,13 +782,7 @@ pub(crate) struct PlatformInputHandler {
     handler: Box<dyn InputHandler>,
 }
 
-#[cfg_attr(
-    all(
-        any(target_os = "linux", target_os = "freebsd"),
-        not(any(feature = "x11", feature = "wayland"))
-    ),
-    allow(dead_code)
-)]
+#[allow(dead_code)]
 impl PlatformInputHandler {
     pub fn new(cx: AsyncWindowContext, handler: Box<dyn InputHandler>) -> Self {
         Self { cx, handler }
@@ -1067,6 +1061,7 @@ pub struct WindowOptions {
 
 /// The variables that can be configured when creating a new window
 #[derive(Debug)]
+#[allow(dead_code)]
 pub(crate) struct WindowParams {
     pub bounds: Bounds<Pixels>,
 
@@ -1765,6 +1760,7 @@ impl ClipboardString {
             .and_then(|m| serde_json::from_str(m).ok())
     }
 
+    #[allow(dead_code)]
     pub(crate) fn text_hash(text: &str) -> u64 {
         let mut hasher = SeaHasher::new();
         text.hash(&mut hasher);
