@@ -10,12 +10,14 @@ pub enum SurfaceSource {}
 
 /// A surface element.
 pub struct Surface {
+    #[allow(dead_code)]
     source: SurfaceSource,
     object_fit: ObjectFit,
     style: StyleRefinement,
 }
 
 /// Create a new surface element.
+#[allow(unreachable_code)]
 pub fn surface(source: impl Into<SurfaceSource>) -> Surface {
     Surface {
         source: source.into(),

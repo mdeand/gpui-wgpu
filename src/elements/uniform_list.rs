@@ -712,7 +712,7 @@ mod test {
     #[gpui::test]
     fn test_scroll_strategy_nearest(cx: &mut TestAppContext) {
         use crate::{
-            Context, FocusHandle, ScrollStrategy, UniformListScrollHandle, Window, actions, div,
+            Context, FocusHandle, ScrollStrategy, UniformListScrollHandle, Window, div,
             prelude::*, px, uniform_list,
         };
         use std::ops::Range;

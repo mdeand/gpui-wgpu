@@ -402,6 +402,7 @@ impl<'a> Iterator for BatchIterator<'a> {
 }
 
 #[derive(Debug)]
+#[allow(dead_code)]
 pub(crate) enum PrimitiveBatch<'a> {
     Shadows(&'a [Shadow]),
     Quads(&'a [Quad]),

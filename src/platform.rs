@@ -12,9 +12,9 @@ use crate::{
     Action, AnyWindowHandle, App, AsyncWindowContext, BackgroundExecutor, Bounds,
     DEFAULT_WINDOW_SIZE, DevicePixels, DispatchEventResult, Font, FontId, FontMetrics, FontRun,
     ForegroundExecutor, GlyphId, GpuSpecs, ImageSource, Keymap, LineLayout, Pixels, PlatformInput,
-    Point, Priority, RealtimePriority, RenderGlyphParams, RenderImage, RenderImageParams,
-    RenderSvgParams, Scene, ShapedGlyph, ShapedRun, SharedString, Size, SvgRenderer,
-    SystemWindowTab, Task, TaskLabel, TaskTiming, ThreadTaskTimings, Window, WindowControlArea,
+    Point, Priority, RenderGlyphParams, RenderImage, RenderImageParams,
+    RenderSvgParams, RunnableMeta, Scene, ShapedGlyph, ShapedRun, SharedString, Size, SvgRenderer,
+    SystemWindowTab, Task, TaskTiming, ThreadTaskTimings, Window, WindowControlArea,
     hash, point, px, size,
 };
 use anyhow::Result;
@@ -427,17 +427,9 @@ pub(crate) trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
 /// This type is public so that our test macro can generate and use it, but it should not
 /// be considered part of our public API.
 #[doc(hidden)]
-#[derive(Debug)]
-pub struct RunnableMeta {
-    /// Location of the runnable
-    pub location: &'static core::panic::Location<'static>,
-}
-
+/// A runnable task variant used by the platform dispatcher.
 #[doc(hidden)]
-pub enum RunnableVariant {
-    Meta(Runnable<RunnableMeta>),
-    Compat(Runnable),
-}
+pub type RunnableVariant = Runnable<RunnableMeta>;
 
 /// This type is public so that our test macro can generate and use it, but it should not
 /// be considered part of our public API.
@@ -446,13 +438,22 @@ pub trait PlatformDispatcher: Send + Sync {
     fn get_all_timings(&self) -> Vec<ThreadTaskTimings>;
     fn get_current_thread_timings(&self) -> Vec<TaskTiming>;
     fn is_main_thread(&self) -> bool;
-    fn dispatch(&self, runnable: RunnableVariant, label: Option<TaskLabel>, priority: Priority);
+    fn dispatch(&self, runnable: RunnableVariant, priority: Priority);
     fn dispatch_on_main_thread(&self, runnable: RunnableVariant, priority: Priority);
     fn dispatch_after(&self, duration: Duration, runnable: RunnableVariant);
-    fn spawn_realtime(&self, priority: RealtimePriority, f: Box<dyn FnOnce() + Send>);
+    fn spawn_realtime(&self, f: Box<dyn FnOnce() + Send>);
+
+    /// Wake the main event loop. Used by external threads (e.g. a tokio watch
+    /// channel watcher) to signal that there is new data to render. The default
+    /// implementation is a no-op for platforms that don't need it.
+    fn wakeup(&self) {}
 
     fn now(&self) -> Instant {
         Instant::now()
+    }
+
+    fn increase_timer_resolution(&self) -> util::Deferred<Box<dyn FnOnce()>> {
+        util::defer(Box::new(|| {}))
     }
 
     #[cfg(any(test, feature = "test-support"))]
@@ -777,13 +778,7 @@ pub(crate) struct PlatformInputHandler {
     handler: Box<dyn InputHandler>,
 }
 
-#[cfg_attr(
-    all(
-        any(target_os = "linux", target_os = "freebsd"),
-        not(any(feature = "x11", feature = "wayland"))
-    ),
-    allow(dead_code)
-)]
+#[allow(dead_code)]
 impl PlatformInputHandler {
     pub fn new(cx: AsyncWindowContext, handler: Box<dyn InputHandler>) -> Self {
         Self { cx, handler }
@@ -1062,6 +1057,7 @@ pub struct WindowOptions {
 
 /// The variables that can be configured when creating a new window
 #[derive(Debug)]
+#[allow(dead_code)]
 pub(crate) struct WindowParams {
     pub bounds: Bounds<Pixels>,
 
@@ -1760,6 +1756,7 @@ impl ClipboardString {
             .and_then(|m| serde_json::from_str(m).ok())
     }
 
+    #[allow(dead_code)]
     pub(crate) fn text_hash(text: &str) -> u64 {
         let mut hasher = SeaHasher::new();
         text.hash(&mut hasher);

@@ -7,6 +7,7 @@ use crate::{
     platform::cross::{atlas::WgpuAtlas, render_context::WgpuContext},
 };
 
+#[allow(dead_code)]
 const fn map_attributes<const N: usize>(
     attribs: &'static [wgpu::VertexAttribute; N],
     location_offset: u32,
@@ -33,6 +34,7 @@ const fn map_attributes<const N: usize>(
 }
 
 impl color::Hsla {
+    #[allow(dead_code)]
     const VERTEX_ATTRIBUTES: &'static [wgpu::VertexAttribute; 4] = &[
         wgpu::VertexAttribute {
             offset: std::mem::offset_of!(color::Hsla, h) as wgpu::BufferAddress,
@@ -58,6 +60,7 @@ impl color::Hsla {
 }
 
 impl color::LinearColorStop {
+    #[allow(dead_code)]
     const VERTEX_ATTRIBUTES: &'static [wgpu::VertexAttribute; 2] = &[
         wgpu::VertexAttribute {
             offset: std::mem::offset_of!(LinearColorStop, color) as wgpu::BufferAddress,
@@ -73,6 +76,7 @@ impl color::LinearColorStop {
 }
 
 impl color::Background {
+    #[allow(dead_code)]
     const VERTEX_ATTRIBUTES: &'static [wgpu::VertexAttribute; 7] = &{
         let linear_color_stop_vertex_attributes = map_attributes(
             LinearColorStop::VERTEX_ATTRIBUTES,
@@ -122,6 +126,7 @@ struct GlobalParams {
 }
 
 impl GlobalParams {
+    #[allow(dead_code)]
     const VERTEX_ATTRIBUTES: &'static [wgpu::VertexAttribute; 3] = &[
         wgpu::VertexAttribute {
             offset: std::mem::offset_of!(GlobalParams, viewport_size) as wgpu::BufferAddress,
@@ -149,6 +154,7 @@ struct Bounds {
 }
 
 impl geometry::Corners<ScaledPixels> {
+    #[allow(dead_code)]
     const VERTEX_ATTRIBUTES: &'static [wgpu::VertexAttribute; 4] = &[
         wgpu::VertexAttribute {
             offset: std::mem::offset_of!(geometry::Corners<ScaledPixels>, top_left)
@@ -178,6 +184,7 @@ impl geometry::Corners<ScaledPixels> {
 }
 
 impl geometry::Edges<ScaledPixels> {
+    #[allow(dead_code)]
     const VERTEX_ATTRIBUTES: &'static [wgpu::VertexAttribute; 4] = &[
         wgpu::VertexAttribute {
             offset: std::mem::offset_of!(geometry::Edges<ScaledPixels>, top) as wgpu::BufferAddress,
@@ -206,6 +213,7 @@ impl geometry::Edges<ScaledPixels> {
 }
 
 impl Bounds {
+    #[allow(dead_code)]
     const VERTEX_ATTRIBUTES: &'static [wgpu::VertexAttribute; 2] = &[
         wgpu::VertexAttribute {
             offset: std::mem::offset_of!(Bounds, origin) as wgpu::BufferAddress,
@@ -228,6 +236,7 @@ struct SurfaceParams {
 }
 
 impl Quad {
+    #[allow(dead_code)]
     const VERTEX_ATTRIBUTES: &'static [wgpu::VertexAttribute; 22] = &{
         let bounds_vertex_attributes = map_attributes(
             Bounds::VERTEX_ATTRIBUTES,
@@ -301,30 +310,36 @@ impl Quad {
 }
 
 #[repr(C)]
+#[allow(dead_code)]
 struct QuadsData {
     globals: GlobalParams,
 }
 
 #[repr(C)]
+#[allow(dead_code)]
 struct ShadowsData {
     globals: GlobalParams,
 }
 
 #[repr(C)]
+#[allow(dead_code)]
 struct PathRasterizationData {
     globals: GlobalParams,
 }
 
+#[allow(dead_code)]
 struct PathsData {
     globals: GlobalParams,
     t_sprite: wgpu::TextureView,
     s_sprite: wgpu::Sampler,
 }
 
+#[allow(dead_code)]
 struct UnderlinesData {
     globals: GlobalParams,
 }
 
+#[allow(dead_code)]
 struct MonoSpritesData {
     globals: GlobalParams,
     gamma_ratios: [f32; 4],
@@ -333,12 +348,14 @@ struct MonoSpritesData {
     s_sprite: wgpu::Sampler,
 }
 
+#[allow(dead_code)]
 struct PolySpritesData {
     globals: GlobalParams,
     t_sprite: wgpu::TextureView,
     s_sprite: wgpu::Sampler,
 }
 
+#[allow(dead_code)]
 struct SurfacesData {
     globals: GlobalParams,
     surface_params: SurfaceParams,
@@ -347,12 +364,14 @@ struct SurfacesData {
     s_texture: wgpu::Sampler,
 }
 
+#[allow(dead_code)]
 struct PathSprite {
     bounds: geometry::Bounds<f32>,
 }
 
 #[repr(C)]
 #[derive(Clone, Copy)]
+#[allow(dead_code)]
 struct PathRasterizationVertex {
     xy_position: geometry::Point<ScaledPixels>,
     st_position: geometry::Point<f32>,
@@ -361,6 +380,7 @@ struct PathRasterizationVertex {
 }
 
 impl PathRasterizationVertex {
+    #[allow(dead_code)]
     const VERTEX_ATTRIBUTES: &'static [wgpu::VertexAttribute; 10] = &{
         let color_vertex_attributes = map_attributes(
             color::Background::VERTEX_ATTRIBUTES,
@@ -398,6 +418,7 @@ impl PathRasterizationVertex {
         ]
     };
 
+    #[allow(dead_code)]
     fn layout() -> wgpu::VertexBufferLayout<'static> {
         wgpu::VertexBufferLayout {
             array_stride: std::mem::size_of::<PathRasterizationVertex>() as wgpu::BufferAddress,
@@ -408,6 +429,7 @@ impl PathRasterizationVertex {
 }
 
 impl AtlasTextureId {
+    #[allow(dead_code)]
     const VERTEX_ATTRIBUTES: &'static [wgpu::VertexAttribute; 2] = &{
         [
             wgpu::VertexAttribute {
@@ -425,12 +447,14 @@ impl AtlasTextureId {
 }
 
 #[repr(C)]
+#[allow(dead_code)]
 struct AtlasBounds {
     origin: [i32; 2],
     size: [i32; 2],
 }
 
 impl AtlasBounds {
+    #[allow(dead_code)]
     const VERTEX_ATTRIBUTES: &'static [wgpu::VertexAttribute; 2] = &{
         [
             wgpu::VertexAttribute {
@@ -448,6 +472,7 @@ impl AtlasBounds {
 }
 
 impl AtlasTile {
+    #[allow(dead_code)]
     const VERTEX_ATTRIBUTES: &'static [wgpu::VertexAttribute; 6] = &{
         let texture_id_vertex_attributes = map_attributes(
             AtlasTextureId::VERTEX_ATTRIBUTES,
@@ -481,6 +506,7 @@ impl AtlasTile {
 }
 
 impl TransformationMatrix {
+    #[allow(dead_code)]
     const VERTEX_ATTRIBUTES: &'static [wgpu::VertexAttribute; 2] = &{
         [
             wgpu::VertexAttribute {
@@ -500,6 +526,7 @@ impl TransformationMatrix {
 }
 
 impl MonochromeSprite {
+    #[allow(dead_code)]
     const VERTEX_ATTRIBUTES: &'static [wgpu::VertexAttribute; 16] = &{
         let bounds_vertex_attributes = map_attributes(
             Bounds::VERTEX_ATTRIBUTES,
@@ -569,6 +596,7 @@ struct ColorAdjustments {
 }
 
 struct WgpuPipelines {
+    #[allow(dead_code)]
     color_targets: Vec<Option<wgpu::ColorTargetState>>,
 
     quads_bind_group_layout: wgpu::BindGroupLayout,
@@ -1114,6 +1142,7 @@ impl WgpuPipelines {
 }
 
 struct RenderingParameters {
+    #[allow(dead_code)]
     path_sample_count: u32,
     gamma_ratios: [f32; 4],
     grayscale_enhanced_contrast: f32,
@@ -1593,8 +1622,8 @@ impl WgpuRenderer {
                     }
                     PrimitiveBatch::Surfaces(surfaces) => {
                         for surface in surfaces {
-                            if let crate::SurfaceContent::Wgpu(surface_id) = &surface.content {
-                                if let Some(idx) =
+                            let crate::SurfaceContent::Wgpu(surface_id) = &surface.content;
+                            if let Some(idx) =
                                     self.context.surface_registry.front_index(*surface_id)
                                 {
                                     if self
@@ -1709,7 +1738,6 @@ impl WgpuRenderer {
                                         seen_surfaces.push(*surface_id);
                                     }
                                 }
-                            }
                         }
                     }
                     // TODO(mdeand): Implement paths rendering.
@@ -1735,10 +1763,12 @@ impl WgpuRenderer {
             .configure(&self.context.device, &self.surface_configuration);
     }
 
+    #[allow(dead_code)]
     pub fn sprite_atlas(&self) -> Arc<dyn PlatformAtlas> {
         self.atlas.clone()
     }
 
+    #[allow(dead_code)]
     pub fn gpu_specs(&self) -> GpuSpecs {
         let info = self.context.adapter.get_info();
         GpuSpecs {
@@ -1749,6 +1779,7 @@ impl WgpuRenderer {
         }
     }
 
+    #[allow(dead_code)]
     pub fn update_transparency(&mut self, transparent: bool) {
         self.surface_configuration.alpha_mode = if transparent {
             wgpu::CompositeAlphaMode::PreMultiplied
@@ -1761,6 +1792,7 @@ impl WgpuRenderer {
             .configure(&self.context.device, &self.surface_configuration);
     }
 
+    #[allow(dead_code)]
     pub fn viewport_size(&self) -> geometry::Size<DevicePixels> {
         geometry::Size {
             width: DevicePixels(self.surface_configuration.width as i32),

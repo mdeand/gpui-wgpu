@@ -1,12 +1,13 @@
-# Build artifacts
+# Build Artifacts
 **/target
 **/cargo-target
 *.wasm
 
-# IDE and editor
+# IDE and Editor
 .DS_Store
 .idea
 .vscode
+.zed
 *.xcodeproj
 *.xcworkspace
 DerivedData/
@@ -23,10 +24,13 @@ xcuserdata/
 .envrc
 /result
 
-# Environment and secrets
+# Environment and Secrets
 .env
 .env.secret.toml
 .netrc
+
+# Version Control
+.git
 
 # Misc
 **/*.db

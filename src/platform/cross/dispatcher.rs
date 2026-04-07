@@ -1,5 +1,5 @@
 use crate::{
-    GLOBAL_THREAD_TIMINGS, PlatformDispatcher, Priority, PriorityQueueSender, RealtimePriority,
+    GLOBAL_THREAD_TIMINGS, PlatformDispatcher, Priority, PriorityQueueSender,
     RunnableVariant, THREAD_TIMINGS, ThreadTaskTimings,
 };
 use priority_threadpool::ThreadPool;
@@ -58,16 +58,8 @@ impl PlatformDispatcher for Dispatcher {
         std::thread::current().id() == self.main_thread_id
     }
 
-    fn dispatch(
-        &self,
-        runnable: RunnableVariant,
-        _label: Option<crate::TaskLabel>,
-        priority: Priority,
-    ) {
-        match runnable {
-            RunnableVariant::Meta(runnable) => self.threadpool.queue(&priority, runnable),
-            RunnableVariant::Compat(runnable) => self.threadpool.queue(&priority, runnable),
-        }
+    fn dispatch(&self, runnable: RunnableVariant, priority: Priority) {
+        self.threadpool.queue(&priority, runnable)
     }
 
     fn dispatch_on_main_thread(&self, runnable: RunnableVariant, priority: Priority) {
@@ -82,19 +74,15 @@ impl PlatformDispatcher for Dispatcher {
     }
 
     fn dispatch_after(&self, duration: std::time::Duration, runnable: RunnableVariant) {
-        match runnable {
-            RunnableVariant::Meta(runnable) => {
-                self.threadpool
-                    .queue_delayed(&Priority::Low, duration, runnable);
-            }
-            RunnableVariant::Compat(runnable) => {
-                self.threadpool
-                    .queue_delayed(&Priority::Low, duration, runnable);
-            }
-        }
+        self.threadpool
+            .queue_delayed(&Priority::Low, duration, runnable);
     }
 
-    fn spawn_realtime(&self, _priority: RealtimePriority, f: Box<dyn FnOnce() + Send>) {
+    fn wakeup(&self) {
+        let _ = self.proxy.send_event(CrossEvent::WakeUp);
+    }
+
+    fn spawn_realtime(&self, f: Box<dyn FnOnce() + Send>) {
         // TODO(mdeand): There's a crate (thread-priority) that implements thread
         // TODO(mdeand): priorities, but I don't want to add it right now.
 

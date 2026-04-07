@@ -30,10 +30,6 @@ impl WgpuAtlas {
         self.0.lock().flush(encoder);
     }
 
-    pub fn after_frame(&self) {
-        // TODO(mdeand): Is this even necessary?
-    }
-
     pub(crate) fn get_texture_info(&self, texture_id: AtlasTextureId) -> WgpuTextureInfo {
         let state = self.0.lock();
         let texture = &state.storage[texture_id];
@@ -102,6 +98,7 @@ impl PlatformAtlas for WgpuAtlas {
     }
 }
 
+#[allow(dead_code)]
 struct WgpuAtlasState {
     atlas_target: Option<wgpu::Texture>,
     atlas_target_view: Option<wgpu::TextureView>,

@@ -1,6 +1,7 @@
-use crate::{PlatformDispatcher, Priority, RunnableVariant, TaskLabel};
+use crate::scheduler::{Instant, SessionId, TestScheduler, TestSchedulerConfig};
+use crate::{PlatformDispatcher, Priority, RunnableVariant};
 use backtrace::Backtrace;
-use collections::{HashMap, HashSet, VecDeque};
+use collections::{HashMap, VecDeque};
 use parking::Unparker;
 use parking_lot::Mutex;
 use rand::prelude::*;
@@ -10,7 +11,7 @@ use std::{
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
-    time::{Duration, Instant},
+    time::Duration,
 };
 use util::post_inc;
 
@@ -21,13 +22,15 @@ struct TestDispatcherId(usize);
 pub struct TestDispatcher {
     id: TestDispatcherId,
     state: Arc<Mutex<TestDispatcherState>>,
+    test_scheduler: Arc<TestScheduler>,
+    session_id: SessionId,
+    num_cpus: Arc<Mutex<Option<usize>>>,
 }
 
 struct TestDispatcherState {
     random: StdRng,
     foreground: HashMap<TestDispatcherId, VecDeque<RunnableVariant>>,
     background: Vec<RunnableVariant>,
-    deprioritized_background: Vec<RunnableVariant>,
     delayed: Vec<(Duration, RunnableVariant)>,
     start_time: Instant,
     time: Duration,
@@ -36,18 +39,20 @@ struct TestDispatcherState {
     allow_parking: bool,
     waiting_hint: Option<String>,
     waiting_backtrace: Option<Backtrace>,
-    deprioritized_task_labels: HashSet<TaskLabel>,
     block_on_ticks: RangeInclusive<usize>,
     unparkers: Vec<Unparker>,
 }
 
 impl TestDispatcher {
-    pub fn new(random: StdRng) -> Self {
+    pub fn new(seed: u64) -> Self {
+        let random = StdRng::seed_from_u64(seed);
+        let test_scheduler = Arc::new(TestScheduler::new(TestSchedulerConfig::with_seed(seed)));
+        let session_id = test_scheduler.allocate_session_id();
+
         let state = TestDispatcherState {
             random,
             foreground: HashMap::default(),
             background: Vec::new(),
-            deprioritized_background: Vec::new(),
             delayed: Vec::new(),
             time: Duration::ZERO,
             start_time: Instant::now(),
@@ -56,7 +61,6 @@ impl TestDispatcher {
             allow_parking: false,
             waiting_hint: None,
             waiting_backtrace: None,
-            deprioritized_task_labels: Default::default(),
             block_on_ticks: 0..=1000,
             unparkers: Default::default(),
         };
@@ -64,7 +68,30 @@ impl TestDispatcher {
         TestDispatcher {
             id: TestDispatcherId(0),
             state: Arc::new(Mutex::new(state)),
+            test_scheduler,
+            session_id,
+            num_cpus: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Returns the TestScheduler backing this dispatcher.
+    pub fn scheduler(&self) -> &Arc<TestScheduler> {
+        &self.test_scheduler
+    }
+
+    /// Returns the session ID for this dispatcher.
+    pub fn session_id(&self) -> SessionId {
+        self.session_id
+    }
+
+    /// Returns the number of CPUs override, if set.
+    pub fn num_cpus_override(&self) -> Option<usize> {
+        *self.num_cpus.lock()
+    }
+
+    /// Sets the number of CPUs override for testing.
+    pub fn set_num_cpus(&self, count: usize) {
+        *self.num_cpus.lock() = Some(count);
     }
 
     pub fn advance_clock(&self, by: Duration) {
@@ -143,13 +170,7 @@ impl TestDispatcher {
         let runnable;
         let main_thread;
         if foreground_len == 0 && background_len == 0 {
-            let deprioritized_background_len = state.deprioritized_background.len();
-            if deprioritized_background_len == 0 {
-                return false;
-            }
-            let ix = state.random.random_range(0..deprioritized_background_len);
-            main_thread = false;
-            runnable = state.deprioritized_background.swap_remove(ix);
+            return false;
         } else {
             main_thread = state.random.random_ratio(
                 foreground_len as u32,
@@ -176,21 +197,15 @@ impl TestDispatcher {
         drop(state);
 
         // todo(localcc): add timings to tests
-        match runnable {
-            RunnableVariant::Meta(runnable) => runnable.run(),
-            RunnableVariant::Compat(runnable) => runnable.run(),
-        };
+        runnable.run();
 
         self.state.lock().is_main_thread = was_main_thread;
 
         true
     }
 
-    pub fn deprioritize(&self, task_label: TaskLabel) {
-        self.state
-            .lock()
-            .deprioritized_task_labels
-            .insert(task_label);
+    pub fn drain_tasks(&self) {
+        self.test_scheduler.drain_tasks();
     }
 
     pub fn run_until_parked(&self) {
@@ -233,7 +248,7 @@ impl TestDispatcher {
     }
 
     pub fn rng(&self) -> StdRng {
-        self.state.lock().random.clone()
+        StdRng::from_rng(&mut self.state.lock().random)
     }
 
     pub fn set_block_on_ticks(&self, range: std::ops::RangeInclusive<usize>) {
@@ -262,6 +277,9 @@ impl Clone for TestDispatcher {
         Self {
             id: TestDispatcherId(id),
             state: self.state.clone(),
+            test_scheduler: self.test_scheduler.clone(),
+            session_id: self.session_id,
+            num_cpus: self.num_cpus.clone(),
         }
     }
 }
@@ -284,15 +302,8 @@ impl PlatformDispatcher for TestDispatcher {
         state.start_time + state.time
     }
 
-    fn dispatch(&self, runnable: RunnableVariant, label: Option<TaskLabel>, _priority: Priority) {
-        {
-            let mut state = self.state.lock();
-            if label.is_some_and(|label| state.deprioritized_task_labels.contains(&label)) {
-                state.deprioritized_background.push(runnable);
-            } else {
-                state.background.push(runnable);
-            }
-        }
+    fn dispatch(&self, runnable: RunnableVariant, _priority: Priority) {
+        self.state.lock().background.push(runnable);
         self.unpark_all();
     }
 
@@ -319,7 +330,7 @@ impl PlatformDispatcher for TestDispatcher {
         Some(self)
     }
 
-    fn spawn_realtime(&self, _priority: crate::RealtimePriority, f: Box<dyn FnOnce() + Send>) {
+    fn spawn_realtime(&self, f: Box<dyn FnOnce() + Send>) {
         std::thread::spawn(move || {
             f();
         });

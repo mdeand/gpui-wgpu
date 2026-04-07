@@ -1,99 +1,120 @@
 {
+  description = "Standalone GPUI build";
+
   inputs = {
-    flake-utils.url = "github:numtide/flake-utils";
-    naersk.url = "github:nix-community/naersk";
     nixpkgs.url = "github:NixOS/nixpkgs/nixpkgs-unstable";
-    rust-overlay.url = "github:oxalica/rust-overlay";
+    fenix = {
+      url = "github:nix-community/fenix";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
+    crane.url = "github:ipetkov/crane";
+    flake-utils.url = "github:numtide/flake-utils";
   };
 
   outputs =
     {
       self,
-      flake-utils,
-      naersk,
       nixpkgs,
-      rust-overlay,
+      fenix,
+      crane,
+      flake-utils,
     }:
     flake-utils.lib.eachDefaultSystem (
       system:
       let
-        pkgs = (import nixpkgs) {
-          inherit system;
-          overlays = [
-            (import rust-overlay)
-          ];
+        pkgs = nixpkgs.legacyPackages.${system};
+        inherit (pkgs) lib;
+
+        toolchain = fenix.packages.${system}.latest.withComponents [
+          "cargo"
+          "rustc"
+          "rust-src"
+          "rustfmt"
+          "clippy"
+        ];
+
+        craneLib = (crane.mkLib pkgs).overrideToolchain toolchain;
+
+        src = lib.cleanSourceWith {
+          src = craneLib.path ./.;
+          filter =
+            path: type:
+            (craneLib.filterCargoSources path type)
+            || (lib.hasSuffix ".metal" path)
+            || (lib.hasSuffix ".wgsl" path)
+            || (lib.hasSuffix ".hlsl" path)
+            || (lib.hasSuffix ".glsl" path);
         };
 
-        naersk' = pkgs.callPackage naersk { };
-
-        buildInputs = with pkgs; [
-          libxkbcommon
-          wayland
-          vulkan-loader
-          xorg.libX11
-          xorg.libXcursor
-          xorg.libXi
-          xorg.libXrandr
-          xorg.libxcb
-          xorg.libXrender
-          xorg.libXfixes
-          fontconfig
-          freetype
-          openssl
-          libgit2
+        linuxLibs = with pkgs; [
           alsa-lib
-          zlib
-          stdenv.cc.cc.lib
+          libdrm
+          mesa # provides libgbm
+          libxkbcommon
+          libva
+          vulkan-loader
+          wayland
+          xorg.libX11
+          xorg.libxcb
         ];
 
-        nativeBuildInputs = with pkgs; [
-          (pkgs.rust-bin.stable.latest.default.override {
-            extensions = [
-              "rust-src"
-              "cargo"
-              "rustc"
-            ];
-          })
-          pkg-config
-          cmake
-          perl
-          python3
-        ];
-      in
-      rec {
-        devShell = pkgs.mkShell {
-          RUST_SRC_PATH = "${
-            pkgs.rust-bin.stable.latest.default.override {
-              extensions = [ "rust-src" ];
-            }
-          }/lib/rustlib/src/rust/library";
+        commonArgs = {
+          pname = "gpui-ce";
+          version = "0.3.3";
 
-          LD_LIBRARY_PATH = pkgs.lib.makeLibraryPath buildInputs;
-          XDG_SESSION_TYPE = "wayland";
-          shellHook = ''
-            export WAYLAND_DISPLAY=''${WAYLAND_DISPLAY:-wayland-0}
-            export XDG_RUNTIME_DIR=''${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
-            export VK_LAYER_PATH="${pkgs.renderdoc}/lib:${pkgs.renderdoc}/lib64:${pkgs.renderdoc}/share/vulkan/implicit_layer.d:$VK_LAYER_PATH"
-            export VK_INSTANCE_LAYERS="VK_LAYER_RENDERDOC_Capture:$VK_INSTANCE_LAYERS"
-          '';
+          inherit src;
+          strictDeps = true;
 
-          nativeBuildInputs =
+          nativeBuildInputs = with pkgs; [
+            cmake
+            pkg-config
+            rustPlatform.bindgenHook
+          ];
+
+          buildInputs =
             with pkgs;
             [
-              nixfmt
-              cmake
-              rustc
-              rustfmt
-              cargo
-              clippy
-              rust-analyzer
-              vulkan-tools
-              vulkan-loader
-              vulkan-validation-layers
-              renderdoc
+              fontconfig
+              freetype
+              openssl
+              zlib
             ]
-            ++ buildInputs
-            ++ nativeBuildInputs;
+            ++ lib.optionals stdenv.isLinux linuxLibs
+            ++ lib.optionals stdenv.isDarwin [
+              apple-sdk_15
+              (darwinMinVersionHook "11.0")
+            ];
+
+          env = lib.optionalAttrs pkgs.stdenv.isLinux {
+            LD_LIBRARY_PATH = lib.makeLibraryPath linuxLibs;
+          };
+
+          cargoExtraArgs = "--features runtime_shaders";
+        };
+
+        cargoArtifacts = craneLib.buildDepsOnly commonArgs;
+
+        gpui = craneLib.buildPackage (
+          commonArgs
+          // {
+            inherit cargoArtifacts;
+          }
+        );
+      in
+      {
+        packages.default = gpui;
+
+        devShells.default = pkgs.mkShell {
+          inputsFrom = [ gpui ];
+          packages = [ toolchain ];
+
+          shellHook = ''
+            export RUST_BACKTRACE=1
+            export RUST_SRC_PATH="${toolchain}/lib/rustlib/src/rust/library"
+            ${lib.optionalString pkgs.stdenv.isLinux ''
+              export LD_LIBRARY_PATH="${lib.makeLibraryPath linuxLibs}:$LD_LIBRARY_PATH"
+            ''}
+          '';
         };
       }
     );

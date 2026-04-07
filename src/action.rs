@@ -1,6 +1,6 @@
 use anyhow::{Context as _, Result};
 use collections::HashMap;
-pub use gpui_macros::Action;
+pub use gpui_ce_macros::Action;
 pub use no_action::{NoAction, is_no_action};
 use serde_json::json;
 use std::{

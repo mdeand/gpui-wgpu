@@ -72,7 +72,6 @@ impl CrossPlatform {
         let (main_tx, main_rx) = PriorityQueueReceiver::new();
         let mut event_loop =
             winit::event_loop::EventLoop::<CrossEvent>::with_user_event().build()?;
-        event_loop.set_control_flow(winit::event_loop::ControlFlow::Poll);
         let event_loop_proxy = event_loop.create_proxy();
 
         let dispatcher = Arc::new(Dispatcher::new(main_tx, event_loop_proxy.clone()));
@@ -359,14 +358,7 @@ impl AppState {
 
     fn drain_main_queue(&mut self) {
         while let Ok(Some(runnable)) = self.main_rx.try_pop() {
-            match runnable {
-                RunnableVariant::Compat(runnable) => {
-                    runnable.run();
-                }
-                RunnableVariant::Meta(runnable) => {
-                    runnable.run();
-                }
-            }
+            runnable.run();
         }
     }
 }
@@ -407,9 +399,20 @@ impl winit::application::ApplicationHandler<CrossEvent> for AppState {
 
         self.drain_main_queue();
 
-        for window in self.windows.values() {
-            window.window().request_redraw();
-        }
+        // Do NOT unconditionally request_redraw() here. Rendering is driven
+        // by three sources:
+        //   1. CrossEvent::WakeUp — sent by BackgroundExecutor::wake() from
+        //      external threads (e.g. a tokio watcher task) when new data
+        //      arrives. The WakeUp handler calls request_redraw().
+        //   2. CrossEvent::SurfacePresent — fired after each GPU present; the
+        //      handler calls request_redraw() to chain the next frame when
+        //      the window still has content to show.
+        //   3. OS events (resize, focus, etc.) which set dirty state via
+        //      cx.notify(), causing the dispatcher to send WakeUp.
+        //
+        // With no unconditional redraw, the event loop genuinely sleeps when
+        // idle, dropping CPU usage to ~0%.
+        event_loop.set_control_flow(winit::event_loop::ControlFlow::Wait);
 
         self.clear_active_context();
     }
@@ -531,10 +534,17 @@ impl winit::application::ApplicationHandler<CrossEvent> for AppState {
                     |cb| {
                         cb(crate::RequestFrameOptions {
                             force_render: false,
-                            require_presentation: true,
+                            // Only present after an actual draw; don't keep the
+                            // GPU busy re-presenting the same frame every tick.
+                            require_presentation: false,
                         });
                     },
                 );
+                // Do NOT fall through to the unconditional request_redraw() at
+                // the end of window_event — RedrawRequested must not chain
+                // itself or the event loop never sleeps under ControlFlow::Wait.
+                self.clear_active_context();
+                return;
             }
 
             winit::event::WindowEvent::KeyboardInput {
@@ -725,6 +735,15 @@ impl winit::application::ApplicationHandler<CrossEvent> for AppState {
             }
 
             _ => (),
+        }
+
+        // Any window event may dirty the window via cx.notify().
+        // Under ControlFlow::Wait, redraws only happen when explicitly
+        // requested, so we must request one here. The on_request_frame
+        // handler checks invalidator.is_dirty() before doing real work,
+        // so this is a no-op when nothing actually changed.
+        if let Some(window) = self.windows.get(&window_id) {
+            window.window().request_redraw();
         }
 
         self.clear_active_context();
