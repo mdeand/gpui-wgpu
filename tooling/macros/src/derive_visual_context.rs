@@ -28,8 +28,6 @@ pub fn derive_visual_context(input: TokenStream) -> TokenStream {
         impl #impl_generics gpui::VisualContext for #type_name #type_generics
         #where_clause
         {
-            type Result<T> = T;
-
             fn window_handle(&self) -> gpui::AnyWindowHandle {
                 self.#window_variable.window_handle()
             }
@@ -64,7 +62,7 @@ pub fn derive_visual_context(input: TokenStream) -> TokenStream {
                 V: gpui::Focusable,
             {
                 let focus_handle = gpui::Focusable::focus_handle(entity, self.#app_variable);
-                self.#window_variable.focus(&focus_handle, self.#app_variable);
+                self.#window_variable.focus(&focus_handle);
             }
         }
     };

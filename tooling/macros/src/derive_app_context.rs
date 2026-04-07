@@ -21,6 +21,8 @@ pub fn derive_app_context(input: TokenStream) -> TokenStream {
         impl #impl_generics gpui::AppContext for #type_name #type_generics
         #where_clause
         {
+            type Result<T> = T;
+
             fn new<T: 'static>(
                 &mut self,
                 build_entity: impl FnOnce(&mut gpui::Context<'_, T>) -> T,
