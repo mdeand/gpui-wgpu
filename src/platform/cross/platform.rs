@@ -540,6 +540,11 @@ impl winit::application::ApplicationHandler<CrossEvent> for AppState {
                         });
                     },
                 );
+                // Do NOT fall through to the unconditional request_redraw() at
+                // the end of window_event — RedrawRequested must not chain
+                // itself or the event loop never sleeps under ControlFlow::Wait.
+                self.clear_active_context();
+                return;
             }
 
             winit::event::WindowEvent::KeyboardInput {
