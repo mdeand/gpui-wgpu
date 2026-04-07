@@ -374,6 +374,7 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
                             label: Some("SurfaceExample Pass"),
                             color_attachments: &[Some(wgpu::RenderPassColorAttachment{
                                 view: &view,
+                                depth_slice: None,
                                 resolve_target: None,
                                 ops: wgpu::Operations{
                                     load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
@@ -388,6 +389,7 @@ fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
                                 }),
                                 stencil_ops: None,
                             }),
+                            multiview_mask: None,
                             occlusion_query_set: None,
                             timestamp_writes: None,
                         });
