@@ -5,6 +5,7 @@
 #![allow(unused_mut)] // False positives in platform specific code
 
 extern crate self as gpui;
+extern crate gpui_ce_macros as gpui_macros;
 
 #[macro_use]
 mod action;
@@ -20,6 +21,8 @@ pub mod default_colors;
 mod element;
 mod elements;
 mod executor;
+mod platform_scheduler;
+pub(crate) use platform_scheduler::PlatformScheduler;
 mod geometry;
 mod global;
 mod input;
@@ -33,6 +36,9 @@ pub mod prelude;
 mod profiler;
 mod queue;
 mod scene;
+/// The scheduler module provides task scheduling, execution, and timing primitives.
+#[allow(missing_docs)]
+pub mod scheduler;
 mod shared_string;
 mod shared_uri;
 mod style;
@@ -81,7 +87,7 @@ pub use elements::*;
 pub use executor::*;
 pub use geometry::*;
 pub use global::*;
-pub use gpui_macros::{AppContext, IntoElement, Render, VisualContext, register_action, test};
+pub use gpui_ce_macros::{AppContext, IntoElement, Render, VisualContext, register_action, test};
 pub use http_client;
 pub use input::*;
 pub use inspector::*;
@@ -94,9 +100,14 @@ pub use profiler::*;
 pub(crate) use queue::{PriorityQueueReceiver, PriorityQueueSender};
 pub use refineable::*;
 pub use scene::*;
+// Re-export scheduler types selectively to avoid ambiguity with executor wrappers.
+// Types like Task, BackgroundExecutor, ForegroundExecutor, FallibleTask, and Priority
+// are re-exported via the executor module which wraps them.
+pub use scheduler::{Clock, Instant, RunnableMeta, Scheduler, SessionId, Timer};
+#[cfg(any(test, feature = "test-support"))]
+pub use scheduler::{SharedRng, TestScheduler, TestSchedulerConfig, Yield};
 pub use shared_string::*;
 pub use shared_uri::*;
-pub use smol::Timer;
 use std::{any::Any, future::Future};
 pub use style::*;
 pub use styled::*;

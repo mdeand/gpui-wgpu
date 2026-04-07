@@ -759,7 +759,7 @@ impl App {
 
         let futures = futures::future::join_all(futures);
         if self
-            .background_executor
+            .foreground_executor
             .block_with_timeout(SHUTDOWN_TIMEOUT, futures)
             .is_err()
         {
@@ -767,6 +767,12 @@ impl App {
         }
 
         self.quitting = false;
+    }
+
+    /// Returns a handle to the entity ref counts, used by the test macro for cleanup.
+    #[doc(hidden)]
+    pub fn ref_counts_drop_handle(&self) -> impl Sized + use<> {
+        self.entities.ref_counts_drop_handle()
     }
 
     /// Get the id of the current keyboard layout

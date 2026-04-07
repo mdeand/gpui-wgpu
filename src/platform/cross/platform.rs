@@ -358,14 +358,7 @@ impl AppState {
 
     fn drain_main_queue(&mut self) {
         while let Ok(Some(runnable)) = self.main_rx.try_pop() {
-            match runnable {
-                RunnableVariant::Compat(runnable) => {
-                    runnable.run();
-                }
-                RunnableVariant::Meta(runnable) => {
-                    runnable.run();
-                }
-            }
+            runnable.run();
         }
     }
 }

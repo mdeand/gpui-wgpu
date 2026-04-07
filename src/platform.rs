@@ -12,9 +12,9 @@ use crate::{
     Action, AnyWindowHandle, App, AsyncWindowContext, BackgroundExecutor, Bounds,
     DEFAULT_WINDOW_SIZE, DevicePixels, DispatchEventResult, Font, FontId, FontMetrics, FontRun,
     ForegroundExecutor, GlyphId, GpuSpecs, ImageSource, Keymap, LineLayout, Pixels, PlatformInput,
-    Point, Priority, RealtimePriority, RenderGlyphParams, RenderImage, RenderImageParams,
-    RenderSvgParams, Scene, ShapedGlyph, ShapedRun, SharedString, Size, SvgRenderer,
-    SystemWindowTab, Task, TaskLabel, TaskTiming, ThreadTaskTimings, Window, WindowControlArea,
+    Point, Priority, RenderGlyphParams, RenderImage, RenderImageParams,
+    RenderSvgParams, RunnableMeta, Scene, ShapedGlyph, ShapedRun, SharedString, Size, SvgRenderer,
+    SystemWindowTab, Task, TaskTiming, ThreadTaskTimings, Window, WindowControlArea,
     hash, point, px, size,
 };
 use anyhow::Result;
@@ -427,17 +427,9 @@ pub(crate) trait PlatformWindow: HasWindowHandle + HasDisplayHandle {
 /// This type is public so that our test macro can generate and use it, but it should not
 /// be considered part of our public API.
 #[doc(hidden)]
-#[derive(Debug)]
-pub struct RunnableMeta {
-    /// Location of the runnable
-    pub location: &'static core::panic::Location<'static>,
-}
-
+/// A runnable task variant used by the platform dispatcher.
 #[doc(hidden)]
-pub enum RunnableVariant {
-    Meta(Runnable<RunnableMeta>),
-    Compat(Runnable),
-}
+pub type RunnableVariant = Runnable<RunnableMeta>;
 
 /// This type is public so that our test macro can generate and use it, but it should not
 /// be considered part of our public API.
@@ -446,10 +438,10 @@ pub trait PlatformDispatcher: Send + Sync {
     fn get_all_timings(&self) -> Vec<ThreadTaskTimings>;
     fn get_current_thread_timings(&self) -> Vec<TaskTiming>;
     fn is_main_thread(&self) -> bool;
-    fn dispatch(&self, runnable: RunnableVariant, label: Option<TaskLabel>, priority: Priority);
+    fn dispatch(&self, runnable: RunnableVariant, priority: Priority);
     fn dispatch_on_main_thread(&self, runnable: RunnableVariant, priority: Priority);
     fn dispatch_after(&self, duration: Duration, runnable: RunnableVariant);
-    fn spawn_realtime(&self, priority: RealtimePriority, f: Box<dyn FnOnce() + Send>);
+    fn spawn_realtime(&self, f: Box<dyn FnOnce() + Send>);
 
     /// Wake the main event loop. Used by external threads (e.g. a tokio watch
     /// channel watcher) to signal that there is new data to render. The default
@@ -458,6 +450,10 @@ pub trait PlatformDispatcher: Send + Sync {
 
     fn now(&self) -> Instant {
         Instant::now()
+    }
+
+    fn increase_timer_resolution(&self) -> util::Deferred<Box<dyn FnOnce()>> {
+        util::defer(Box::new(|| {}))
     }
 
     #[cfg(any(test, feature = "test-support"))]
