@@ -46,6 +46,7 @@ use crate::{
     default_colors::{Colors, GlobalColors},
     hash, init_app_menus,
 };
+use crate::ExternalWindowHandle;
 
 mod async_context;
 mod context;
@@ -1025,6 +1026,43 @@ impl App {
         })
     }
 
+    /// Attaches to an existing external window with the given handle, using the root view returned by the given function.
+    pub fn attach_window<V: 'static + Render>(
+        &mut self,
+        external_handle: ExternalWindowHandle,
+        build_root_view: impl FnOnce(&mut Window, &mut App) -> Entity<V>,
+    ) -> anyhow::Result<WindowHandle<V>> {
+        self.update(|cx| {
+            let id = cx.windows.insert(None);
+            let handle = WindowHandle::new(id);
+
+            match Window::attach(handle.into(), external_handle, cx) {
+                Ok(mut window) => {
+                    cx.window_update_stack.push(id);
+                    
+                    let root_view = build_root_view(&mut window, cx);
+                    
+                    cx.window_update_stack.pop();
+
+                    window.root.replace(root_view.into());
+                    window.defer(cx, |window: &mut Window, cx| window.appearance_changed(cx));
+
+                    let clear = window.draw(cx);
+                    clear.clear();
+
+                    cx.window_handles.insert(id, window.handle);
+                    cx.windows.get_mut(id).unwrap().replace(Box::new(window));
+
+                    Ok(handle)
+                }
+                Err(e) => {
+                    cx.windows.remove(id);
+                    Err(e)
+                }
+            }
+        })
+    }
+
     /// Instructs the platform to activate the application by bringing it to the foreground.
     pub fn activate(&self, ignoring_other_apps: bool) {
         self.platform.activate(ignoring_other_apps);
@@ -1402,6 +1440,10 @@ impl App {
             cx.window_update_stack.pop();
 
             if window.removed {
+                // Tell the platform to close the native OS window.
+                // This removes it from AppState.windows so the winit window is destroyed.
+                window.platform_window.close_programmatically();
+
                 cx.window_handles.remove(&id);
                 cx.windows.remove(id);
 

@@ -9,6 +9,9 @@ use winit::event_loop::EventLoopProxy;
 pub enum CrossEvent {
     WakeUp,
     SurfacePresent(winit::window::WindowId),
+    /// Sent by CrossWindow when GPUI programmatically removes a window,
+    /// so the platform layer removes it from AppState.windows and the OS window is destroyed.
+    CloseWindow(winit::window::WindowId),
 }
 
 pub struct Dispatcher {

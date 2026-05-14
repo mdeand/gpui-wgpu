@@ -30,12 +30,14 @@ path = "src/gpui.rs"
 doctest = false
 
 [dependencies]
+device_query = "2.1"
 pollster = "0.4.0"
 winit = "0.30.12"
-wgpu = "28"
+wgpu = { git = "https://github.com/Far-Beyond-Pulsar/wgpu", rev = "fce5b80e8017304449124b12637ec324417e40c8", default-features = false, features = ["web", "webgpu", "dx12", "vulkan", "wgsl"] }
 priority-threadpool = { git = "https://github.com/mdeand/priority-threadpool" }
 anyhow = "1.0.86"
 async-task = "4.7"
+arboard = "3.6.1"
 backtrace = { version = "0.3", optional = true }
 bytemuck = { version = "1.24", features = ["derive"] }
 circular-buffer = "1.0"
@@ -91,12 +93,20 @@ usvg = { version = "0.47.0", default-features = false }
 uuid = { version = "1.1.2", features = ["v4", "v5", "v7", "serde"] }
 waker-fn = "1.2.0"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+core-video = "0.5.2"
+objc2 = "0.5"
+objc2-app-kit = { version = "0.2", features = ["NSApplication", "NSImage"] }
+objc2-foundation = { version = "0.2", features = ["NSData"] }
+
 [dev-dependencies]
 backtrace = "0.3"
+helio = { git="https://github.com/Far-Beyond-Pulsar/Helio", rev="f124aeac0057c8f11c159931ea0c57d4c3b7fef9" }
+glam = "0.29"
+env_logger = "0.11"
 collections = { package = "gpui_collections", version = "0.2.2", features = [
     "test-support",
 ] }
-env_logger = "0.11"
 http_client = { package = "gpui_http_client", version = "0.2.2", features = [
     "test-support",
 ] }
@@ -145,6 +155,10 @@ path = "examples/learn/text.rs"
 [[example]]
 name = "wgpu_surface"
 path = "examples/learn/wgpu_surface.rs"
+
+[[example]]
+name = "wgpu_surface_basic"
+path = "examples/learn/wgpu_surface_basic.rs"
 
 # ============================================================================
 # Bench Examples - Performance benchmarks

@@ -268,6 +268,10 @@ impl PlatformWindow for TestWindow {
 
     fn draw(&self, _scene: &crate::Scene) {}
 
+    fn present_framebuffer_only(&self) {
+        // Test harness doesn't have a real GPU framebuffer; noop is acceptable.
+    }
+
     fn sprite_atlas(&self) -> sync::Arc<dyn crate::PlatformAtlas> {
         self.0.lock().sprite_atlas.clone()
     }

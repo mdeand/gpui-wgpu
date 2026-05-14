@@ -1,11 +1,13 @@
 use crate::{
-    Bounds, Capslock, Modifiers, Pixels, PlatformInputHandler, PlatformWindow, Point, Size,
-    WgpuSurfaceHandle, WindowAppearance, WindowBackgroundAppearance, WindowBounds,
+    Bounds, Capslock, Decorations, Modifiers, Pixels, PlatformInputHandler,
+    PlatformWindow, Point, ResizeEdge, Size, WgpuSurfaceHandle, WindowAppearance,
+    WindowBackgroundAppearance, WindowBounds,
     platform::cross::{
         atlas::WgpuAtlas,
         dispatcher::CrossEvent,
         render_context::WgpuContext,
         renderer::WgpuRenderer,
+        resize_detector::ResizeDetector,
     },
 };
 use std::{
@@ -33,6 +35,8 @@ pub(crate) struct CrossWindowState {
     pub(crate) mouse_position: Cell<Point<Pixels>>,
     pub(crate) modifiers: Cell<Modifiers>,
     pub(crate) capslock: Cell<Capslock>,
+    pub(crate) is_hovered: Cell<bool>,
+    pub(crate) resize_detector: ResizeDetector,
 }
 
 #[derive(Default)]
@@ -82,13 +86,19 @@ impl CrossWindow {
     pub(crate) fn initialize(&self, winit_window: winit::window::Window) {
         let initial_size = winit_window.inner_size();
 
+        #[cfg(target_os = "windows")]
+        {
+            use winit::platform::windows::{CornerPreference, WindowExtWindows};
+            winit_window.set_corner_preference(CornerPreference::Round);
+        }
+
         self.0
             .winit_window
             .set(Arc::new(winit_window))
             .expect("winit_window already initialized");
 
         if initial_size.width > 0 && initial_size.height > 0 {
-            let renderer = WgpuRenderer::new(
+            let mut renderer = WgpuRenderer::new(
                 self.0.wgpu_context.clone(),
                 self.window(),
                 self.0.sprite_atlas.clone(),
@@ -97,6 +107,16 @@ impl CrossWindow {
                 4,
             )
             .expect("Failed to create renderer");
+
+            // Configure the wgpu surface immediately so that any
+            // `get_current_texture()` call that arrives before the first OS
+            // `Resized` event (e.g. from a background render thread calling
+            // `present()`) does not fail with `SurfaceError::Other` on an
+            // unconfigured surface.
+            renderer.update_drawable_size(crate::geometry::Size {
+                width: crate::DevicePixels(initial_size.width as i32),
+                height: crate::DevicePixels(initial_size.height as i32),
+            });
 
             let _ = self.0.renderer.set(RefCell::new(renderer));
             self.window().request_redraw();
@@ -109,6 +129,14 @@ impl CrossWindow {
             .winit_window
             .get()
             .expect("winit_window should be initialized")
+    }
+
+    /// Sends a `CloseWindow` event so the platform's `AppState.windows` map drops
+    /// its reference and the OS window is actually destroyed.
+    pub(crate) fn close_programmatically(&self) {
+        if let Some(w) = self.0.winit_window.get() {
+            let _ = self.0.event_loop_proxy.send_event(CrossEvent::CloseWindow(w.id()));
+        }
     }
 }
 
@@ -232,8 +260,11 @@ impl PlatformWindow for CrossWindow {
     }
 
     fn is_hovered(&self) -> bool {
-        // TODO(mdeand): Add support for tracking hover status.
-        false
+        self.0.state.is_hovered.get()
+    }
+
+    fn is_resizing(&self) -> bool {
+        self.0.state.resize_detector.is_resizing()
     }
 
     fn set_title(&mut self, title: &str) {
@@ -329,6 +360,12 @@ impl PlatformWindow for CrossWindow {
         }
     }
 
+    fn present_framebuffer_only(&self) {
+        if let Some(renderer) = self.0.renderer.get() {
+            renderer.borrow().present_framebuffer_only();
+        }
+    }
+
     fn create_wgpu_surface(
         &self,
         width: u32,
@@ -382,6 +419,39 @@ impl PlatformWindow for CrossWindow {
     }
 
     fn update_ime_position(&self, _bounds: crate::Bounds<crate::Pixels>) {}
+
+    fn start_window_move(&self) {
+        let _ = self.window().drag_window();
+    }
+
+    fn start_window_resize(&self, edge: ResizeEdge) {
+        use winit::window::ResizeDirection;
+        let direction = match edge {
+            ResizeEdge::Top => ResizeDirection::North,
+            ResizeEdge::TopRight => ResizeDirection::NorthEast,
+            ResizeEdge::Right => ResizeDirection::East,
+            ResizeEdge::BottomRight => ResizeDirection::SouthEast,
+            ResizeEdge::Bottom => ResizeDirection::South,
+            ResizeEdge::BottomLeft => ResizeDirection::SouthWest,
+            ResizeEdge::Left => ResizeDirection::West,
+            ResizeEdge::TopLeft => ResizeDirection::NorthWest,
+        };
+        let _ = self.window().drag_resize_window(direction);
+    }
+
+    fn window_decorations(&self) -> Decorations {
+        if self.window().is_decorated() {
+            Decorations::Server
+        } else {
+            Decorations::Client {
+                tiling: crate::Tiling::default(),
+            }
+        }
+    }
+
+    fn close_programmatically(&self) {
+        CrossWindow::close_programmatically(self);
+    }
 }
 
 impl raw_window_handle::HasDisplayHandle for CrossWindow {

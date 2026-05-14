@@ -1,429 +1,398 @@
-/// Example: WgpuSurface with secondary render thread
-/// Demonstrates using the WgpuSurface element with a dedicated render thread
+/// Example: WgpuSurface with Helio Sky Renderer
+/// Demonstrates integration of helio's scene-driven renderer with a gpui WgpuSurface.
 use gpui::{
     App, Application, Context, Render, Window, WindowOptions, div, prelude::*, wgpu_surface, WgpuSurfaceHandle, rgb
 };
-use std::thread;
-use std::time::Duration;
-use std::sync::{Arc, Mutex};
-use gpui::Styled;
-use gpui::AppContext;
+use std::sync::Arc;
 
-// utilities for our cube vertex format
-use bytemuck::{Pod, Zeroable};
+use helio::{
+    Camera, GpuLight, GpuMaterial, LightId, LightType, MaterialId, MeshId,
+    MeshUpload, ObjectDescriptor, ObjectId, PackedVertex, Renderer, RendererConfig,
+    SceneActor,
+};
 
-#[repr(C)]
-#[derive(Clone, Copy, Pod, Zeroable)]
-struct Vertex {
-    position: [f32; 3],
-    normal: [f32; 3],
-    color: [f32; 3],
+// ── Mesh helpers ────────────────────────────────────────────────────────────
+
+fn cube_mesh(center: [f32; 3], half_extent: f32) -> MeshUpload {
+    box_mesh(center, [half_extent, half_extent, half_extent])
 }
 
-#[derive(Clone)]
-struct CubeResources {
-    pipeline: wgpu::RenderPipeline,
-    uniform_buf: wgpu::Buffer,
-    bind_group: wgpu::BindGroup,
-    vert_buf: wgpu::Buffer,
-    vertex_count: u32,
+fn box_mesh(center: [f32; 3], half_extents: [f32; 3]) -> MeshUpload {
+    let c = glam::Vec3::from_array(center);
+    let e = glam::Vec3::from_array(half_extents);
+    let corners = [
+        c + glam::Vec3::new(-e.x, -e.y,  e.z),
+        c + glam::Vec3::new( e.x, -e.y,  e.z),
+        c + glam::Vec3::new( e.x,  e.y,  e.z),
+        c + glam::Vec3::new(-e.x,  e.y,  e.z),
+        c + glam::Vec3::new(-e.x, -e.y, -e.z),
+        c + glam::Vec3::new( e.x, -e.y, -e.z),
+        c + glam::Vec3::new( e.x,  e.y, -e.z),
+        c + glam::Vec3::new(-e.x,  e.y, -e.z),
+    ];
+    let faces: [([usize; 4], [f32; 3], [f32; 3]); 6] = [
+        ([0, 1, 2, 3], [0.0,  0.0,  1.0], [ 1.0, 0.0,  0.0]),
+        ([5, 4, 7, 6], [0.0,  0.0, -1.0], [-1.0, 0.0,  0.0]),
+        ([4, 0, 3, 7], [-1.0, 0.0,  0.0], [ 0.0, 0.0,  1.0]),
+        ([1, 5, 6, 2], [ 1.0, 0.0,  0.0], [ 0.0, 0.0, -1.0]),
+        ([3, 2, 6, 7], [0.0,  1.0,  0.0], [ 1.0, 0.0,  0.0]),
+        ([4, 5, 1, 0], [0.0, -1.0,  0.0], [ 1.0, 0.0,  0.0]),
+    ];
+    let mut vertices = Vec::with_capacity(24);
+    let mut indices  = Vec::with_capacity(36);
+    for (face_index, (quad, normal, tangent)) in faces.iter().enumerate() {
+        let base = (face_index * 4) as u32;
+        let uv = [[0.0f32, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]];
+        for (i, &corner_index) in quad.iter().enumerate() {
+            vertices.push(PackedVertex::from_components(
+                corners[corner_index].to_array(),
+                *normal,
+                uv[i],
+                *tangent,
+                1.0,
+            ));
+        }
+        indices.extend_from_slice(&[base, base + 1, base + 2, base, base + 2, base + 3]);
+    }
+    MeshUpload { vertices, indices }
+}
+
+fn plane_mesh(center: [f32; 3], half_extent: f32) -> MeshUpload {
+    let c = glam::Vec3::from_array(center);
+    let e = half_extent;
+    let normal  = [0.0, 1.0, 0.0];
+    let tangent = [1.0, 0.0, 0.0];
+    let positions = [
+        c + glam::Vec3::new(-e, 0.0, -e),
+        c + glam::Vec3::new( e, 0.0, -e),
+        c + glam::Vec3::new( e, 0.0,  e),
+        c + glam::Vec3::new(-e, 0.0,  e),
+    ];
+    let uvs = [[0.0f32, 0.0], [1.0, 0.0], [1.0, 1.0], [0.0, 1.0]];
+    let vertices = positions
+        .into_iter()
+        .zip(uvs)
+        .map(|(pos, uv)| PackedVertex::from_components(pos.to_array(), normal, uv, tangent, 1.0))
+        .collect();
+    MeshUpload { vertices, indices: vec![0, 1, 2, 0, 2, 3] }
+}
+
+fn make_material(base_color: [f32; 4], roughness: f32, metallic: f32, emissive: [f32; 3], emissive_strength: f32) -> GpuMaterial {
+    GpuMaterial {
+        base_color,
+        emissive: [emissive[0], emissive[1], emissive[2], emissive_strength],
+        roughness_metallic: [roughness, metallic, 1.5, 0.5],
+        tex_base_color: GpuMaterial::NO_TEXTURE,
+        tex_normal:     GpuMaterial::NO_TEXTURE,
+        tex_roughness:  GpuMaterial::NO_TEXTURE,
+        tex_emissive:   GpuMaterial::NO_TEXTURE,
+        tex_occlusion:  GpuMaterial::NO_TEXTURE,
+        workflow: 0,
+        flags: 0,
+        _pad: 0,
+    }
+}
+
+fn insert_object(
+    renderer: &mut Renderer,
+    mesh: MeshId,
+    material: MaterialId,
+    transform: glam::Mat4,
+    radius: f32,
+) -> Result<ObjectId, helio::SceneError> {
+    renderer.scene_mut()
+        .insert_actor(SceneActor::object(ObjectDescriptor {
+            mesh,
+            material,
+            transform,
+            bounds: [
+                transform.w_axis.x,
+                transform.w_axis.y,
+                transform.w_axis.z,
+                radius,
+            ],
+            flags: 0,
+            groups: helio::GroupMask::NONE,
+            movability: Some(helio::Movability::Movable),
+        }))
+        .as_object()
+        .ok_or(helio::SceneError::InvalidHandle { resource: "object" })
+}
+
+fn directional_light(direction: [f32; 3], color: [f32; 3], intensity: f32) -> GpuLight {
+    GpuLight {
+        position_range:  [0.0, 0.0, 0.0, f32::MAX],
+        direction_outer: [direction[0], direction[1], direction[2], 0.0],
+        color_intensity: [color[0], color[1], color[2], intensity],
+        shadow_index: 0, // Enable shadows
+        light_type: LightType::Directional as u32,
+        inner_angle: 0.0,
+        _pad: 0,
+    }
+}
+
+fn point_light(position: [f32; 3], color: [f32; 3], intensity: f32, range: f32) -> GpuLight {
+    GpuLight {
+        position_range:  [position[0], position[1], position[2], range],
+        direction_outer: [0.0, 0.0, -1.0, 0.0],
+        color_intensity: [color[0], color[1], color[2], intensity],
+        shadow_index: 0, // Enable shadows
+        light_type: LightType::Point as u32,
+        inner_angle: 0.0,
+        _pad: 0,
+    }
+}
+
+struct HelioRenderState {
+    renderer: Renderer,
+    cube1_obj: ObjectId,
+    cube2_obj: ObjectId,
+    cube3_obj: ObjectId,
+    sun_light_id: LightId,
+    sun_angle: f32,
+    animation_time: f32,
+    cam_pos: glam::Vec3,
+    cam_yaw: f32,
+    cam_pitch: f32,
+    width: u32,
+    height: u32,
 }
 
 struct SurfaceExample {
     surface: WgpuSurfaceHandle,
-    fps_rx: std::sync::mpsc::Receiver<f64>,
+    /// Lazily initialised on the first render call, once the surface has a size.
+    state: Option<HelioRenderState>,
+    last_frame_time: std::time::Instant,
+    frame_count: u32,
+    last_fps_update: std::time::Instant,
     display_fps: f64,
 }
 
 impl Render for SurfaceExample {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // pull any pending fps samples from channel
-        while let Ok(f) = self.fps_rx.try_recv() {
-            self.display_fps = f;
-        }
-        // ensure we keep repainting (needed since updates arrive off-thread)
-        window.request_animation_frame();
+    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if let Some((view, (dw, dh))) = self.surface.back_view_with_size() {
+            let state = self.state.get_or_insert_with(|| {
+                let device = Arc::new(self.surface.device().clone());
+                let queue  = Arc::new(self.surface.queue().clone());
+                let format = self.surface.format();
+                build_helio_state(device, queue, dw, dh, format)
+            });
 
-        // The surface element will display the front buffer
-        // Overlay a debug border and label for visibility
+            let now = std::time::Instant::now();
+            let dt  = now.duration_since(self.last_frame_time).as_secs_f32();
+            self.last_frame_time = now;
+
+            if state.width != dw || state.height != dh {
+                state.renderer.set_render_size(dw, dh);
+                state.width  = dw;
+                state.height = dh;
+            }
+
+            state.sun_angle    += 0.1 * dt;
+            state.animation_time += dt;
+            let t = state.animation_time;
+
+            // Animate cubes
+            let cube1_transform = glam::Mat4::from_translation(glam::Vec3::new(
+                0.0,
+                0.5 + (t * 0.5).sin() * 0.15,
+                0.0,
+            )) * glam::Mat4::from_rotation_y(t * 0.8);
+
+            let orbit_radius = 2.5;
+            let orbit_speed  = 0.6;
+            let cube2_transform = glam::Mat4::from_translation(glam::Vec3::new(
+                (t * orbit_speed).cos() * orbit_radius,
+                0.4,
+                (t * orbit_speed).sin() * orbit_radius,
+            )) * glam::Mat4::from_rotation_y(t * 3.0)
+                * glam::Mat4::from_rotation_x(t * 2.5)
+                * glam::Mat4::from_rotation_z(t * 1.8);
+
+            let cube3_transform = glam::Mat4::from_translation(glam::Vec3::new(
+                (t * 0.4).sin() * 2.0,
+                0.3 + ((t * 0.8).sin() * 0.5).abs(),
+                (t * 0.8).sin() * 1.5,
+            )) * glam::Mat4::from_rotation_z(t * 1.2);
+
+            let _ = state.renderer.scene_mut().update_object_transform(state.cube1_obj, cube1_transform);
+            let _ = state.renderer.scene_mut().update_object_transform(state.cube2_obj, cube2_transform);
+            let _ = state.renderer.scene_mut().update_object_transform(state.cube3_obj, cube3_transform);
+
+            // Update sun
+            let sun_dir = glam::Vec3::new(
+                state.sun_angle.cos() * 0.3,
+                state.sun_angle.sin(),
+                0.5,
+            ).normalize();
+            let light_dir = [-sun_dir.x, -sun_dir.y, -sun_dir.z];
+            let sun_elev  = sun_dir.y.clamp(-1.0, 1.0);
+            let sun_lux   = (sun_elev * 3.0).clamp(0.0, 1.0);
+            let sun_color = [
+                1.0_f32.min(1.0 + (1.0 - sun_elev) * 0.3),
+                (0.85 + sun_elev * 0.15).clamp(0.0, 1.0),
+                (0.7  + sun_elev * 0.3 ).clamp(0.0, 1.0),
+            ];
+            let _ = state.renderer.scene_mut().update_light(
+                state.sun_light_id,
+                directional_light(light_dir, sun_color, (sun_lux * 0.35).max(0.01)),
+            );
+
+            let (sy, cy) = state.cam_yaw.sin_cos();
+            let (sp, cp) = state.cam_pitch.sin_cos();
+            let forward = glam::Vec3::new(sy * cp, sp, -cy * cp);
+            let aspect  = dw as f32 / dh.max(1) as f32;
+            let camera  = Camera::perspective_look_at(
+                state.cam_pos,
+                state.cam_pos + forward,
+                glam::Vec3::Y,
+                std::f32::consts::FRAC_PI_4,
+                aspect,
+                0.1,
+                1000.0,
+            );
+
+            if let Err(e) = state.renderer.render(&camera, &view) {
+                log::error!("Helio render error: {:?}", e);
+            }
+            drop(view);
+            self.surface.swap_buffers();
+
+            self.frame_count = self.frame_count.wrapping_add(1);
+            if now.duration_since(self.last_fps_update) >= std::time::Duration::from_secs(1) {
+                self.display_fps = self.frame_count as f64;
+                self.frame_count = 0;
+                self.last_fps_update = now;
+            }
+        }
+
+        cx.notify();
+
         div()
             .w(gpui::px(1720.0))
             .h(gpui::px(1080.0))
             .border_4()
-            .border_color(rgb(0xff00ff))
+            .border_color(rgb(0x00aaff))
             .rounded_lg()
             .shadow_xl()
-            .bg(rgb(0x151a29))
+            .bg(rgb(0x000000))
             .m(gpui::px(8.0))
             .child(
                 wgpu_surface(self.surface.clone())
                     .absolute()
-                    .inset_0() // Fill parent div
+                    .inset_0()
             )
             .child(
                 div()
                     .absolute()
                     .top(gpui::px(4.0))
                     .left(gpui::px(8.0))
-                    .text_color(rgb(0xff00ff))
+                    .text_color(rgb(0x00aaff))
                     .text_xl()
-                    .child(format!("FPS: {:.1}", self.display_fps))
+                    .child(format!("FPS: {:.1} | Helio Sky Renderer", self.display_fps))
             )
     }
 }
 
-fn main() {
-    Application::new().run(|cx: &mut App| {
-        // Open a window
-        _ = cx.open_window(WindowOptions::default(), |window: &mut Window, cx: &mut App| {
-            // Create a WgpuSurfaceHandle (400x300 RGBA8)
-            let surface = window.create_wgpu_surface(1720, 1080, wgpu::TextureFormat::Rgba8UnormSrgb)
-                .expect("WgpuSurface not supported on this platform");
-            let surface_thread = surface.clone();
-            let fps_data: Arc<Mutex<f64>> = Arc::new(Mutex::new(0.0));
-            let (fps_tx, fps_rx) = std::sync::mpsc::channel::<f64>();
-
-            // secondary render thread
-            let fps_shared = fps_data.clone();
-            thread::spawn(move || {
-                let mut frame: u32 = 0;
-                // Wait for surface to be ready
-                loop {
-                    if surface_thread.back_buffer_view().is_some() {
-                        break;
-                    }
-                    thread::sleep(Duration::from_millis(10));
-                }
-                // high‑performance render loop without sleeps or per‑frame printouts
-                let mut last_report = std::time::Instant::now();
-                let mut frame_count: u32 = 0;
-                loop {
-                    // throttle producer: wait until the compositor consumes last frame.
-                    surface_thread.wait_for_present();
-                    // draw to back buffer
-                    let device = surface_thread.device();
-                    let queue = surface_thread.queue();
-                    // atomically grab view and its current size to avoid races on
-                    // concurrent resizes (see handle.back_view_with_size doc comment).
-                    let (view, (dw, dh)) = match surface_thread.back_view_with_size() {
-                        Some(tuple) => tuple,
-                        None => {
-                            frame = frame.wrapping_add(1);
-                            thread::sleep(Duration::from_nanos(500));
-                            continue;
-                        }
-                    };
-
-                    // --- GPU cube: spinning, facelit cube ---
-                    use wgpu::util::DeviceExt;
-                    thread_local! {
-                        static RESOURCES: std::cell::RefCell<Option<CubeResources>> = std::cell::RefCell::new(None);
-                    }
-
-                    let t = frame as f32 * 0.01;
-                    let (pipeline, uniform_buf, bind_group, vert_buf, vertex_count) =
-                        RESOURCES.with(|r| {
-                            let mut r = r.borrow_mut();
-                            if r.is_none() {
-                                // shader and pipeline setup
-                                let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                                    label: Some("CubeShader"),
-                                    source: wgpu::ShaderSource::Wgsl(std::borrow::Cow::Borrowed(r#"
-struct VertexInput {
-    @location(0) position: vec3<f32>,
-    @location(1) normal: vec3<f32>,
-    @location(2) color: vec3<f32>,
-};
-
-struct VSOut {
-    @builtin(position) pos: vec4<f32>,
-    @location(0) normal: vec3<f32>,
-    @location(1) color: vec3<f32>,
-};
-
-@group(0) @binding(0) var<uniform> time: f32;
-
-fn rotateY(p: vec3<f32>, angle: f32) -> vec3<f32> {
-    let c = cos(angle);
-    let s = sin(angle);
-    return vec3<f32>(p.x * c + p.z * s, p.y, -p.x * s + p.z * c);
-}
-fn rotateX(p: vec3<f32>, angle: f32) -> vec3<f32> {
-    let c = cos(angle);
-    let s = sin(angle);
-    return vec3<f32>(p.x, p.y * c - p.z * s, p.y * s + p.z * c);
-}
-
-@vertex
-fn vs_main(in: VertexInput) -> VSOut {
-    var pos = in.position;
-    pos = rotateY(pos, time);
-    pos = rotateX(pos, time * 0.5);
-    let view = pos + vec3<f32>(0.0, 0.0, -4.0);
-    let aspect = 400.0 / 300.0;
-    let fovy = 45.0 * 3.14159265 / 180.0;
-    let f = 1.0 / tan(fovy * 0.5);
-    let znear = 0.1;
-    let zfar = 100.0;
-    let proj = mat4x4<f32>(
-        vec4<f32>(f / aspect, 0.0, 0.0, 0.0),
-        vec4<f32>(0.0, f, 0.0, 0.0),
-        vec4<f32>(0.0, 0.0, (zfar + znear) / (znear - zfar), -1.0),
-        vec4<f32>(0.0, 0.0, (2.0 * zfar * znear) / (znear - zfar), 0.0),
+fn build_helio_state(
+    device: Arc<wgpu::Device>,
+    queue: Arc<wgpu::Queue>,
+    width: u32,
+    height: u32,
+    format: wgpu::TextureFormat,
+) -> HelioRenderState {
+    let mut renderer = Renderer::new_with_external_device(
+        device,
+        queue,
+        RendererConfig::new(width, height, format),
     );
-    var out: VSOut;
-    out.pos = proj * vec4<f32>(view, 1.0);
-    var normal = in.normal;
-    normal = rotateY(normal, time);
-    normal = rotateX(normal, time * 0.5);
-    out.normal = normal;
-    out.color = in.color;
-    return out;
+
+    let mat = renderer.scene_mut().insert_material(
+        make_material([0.7, 0.7, 0.72, 1.0], 0.7, 0.0, [0.0, 0.0, 0.0], 0.0)
+    );
+
+    renderer.scene_mut().insert_actor(SceneActor::Sky(
+        helio::SkyActor::new().with_clouds(helio::VolumetricClouds {
+            coverage: 0.5,
+            density: 0.6,
+            base: 1000.0,
+            top: 2000.0,
+            wind_x: 1.0,
+            wind_z: 0.5,
+            speed: 1.0,
+            skylight_intensity: 0.3,
+        })
+    ));
+
+    let cube1  = renderer.scene_mut().insert_actor(SceneActor::mesh(cube_mesh([0.0, 0.0, 0.0], 0.5))).as_mesh().unwrap();
+    let cube2  = renderer.scene_mut().insert_actor(SceneActor::mesh(cube_mesh([0.0, 0.0, 0.0], 0.4))).as_mesh().unwrap();
+    let cube3  = renderer.scene_mut().insert_actor(SceneActor::mesh(cube_mesh([0.0, 0.0, 0.0], 0.3))).as_mesh().unwrap();
+    let ground = renderer.scene_mut().insert_actor(SceneActor::mesh(plane_mesh([0.0, 0.0, 0.0], 20.0))).as_mesh().unwrap();
+    let roof   = renderer.scene_mut().insert_actor(SceneActor::mesh(box_mesh([0.0, 0.0, 0.0], [4.5, 0.15, 4.5]))).as_mesh().unwrap();
+
+    let cube1_obj = insert_object(&mut renderer, cube1, mat, glam::Mat4::IDENTITY, 0.5)
+        .expect("Failed to insert cube1");
+    let cube2_obj = insert_object(&mut renderer, cube2, mat, glam::Mat4::IDENTITY, 0.4)
+        .expect("Failed to insert cube2");
+    let cube3_obj = insert_object(&mut renderer, cube3, mat, glam::Mat4::IDENTITY, 0.3)
+        .expect("Failed to insert cube3");
+    let _ = insert_object(&mut renderer, ground, mat, glam::Mat4::IDENTITY, 20.0);
+    let _ = insert_object(&mut renderer, roof, mat,
+        glam::Mat4::from_translation(glam::Vec3::new(0.0, 2.85, 0.0)), 4.5);
+
+    let init_sun_angle = 1.0f32;
+    let init_sun_dir   = glam::Vec3::new(init_sun_angle.cos() * 0.3, init_sun_angle.sin(), 0.5).normalize();
+    let init_light_dir = [-init_sun_dir.x, -init_sun_dir.y, -init_sun_dir.z];
+    let init_elev      = init_sun_dir.y.clamp(-1.0, 1.0);
+    let init_lux       = (init_elev * 3.0).clamp(0.0, 1.0);
+
+    let sun_light_id = renderer.scene_mut().insert_actor(SceneActor::light(
+        directional_light(init_light_dir, [1.0, 0.85, 0.7], (init_lux * 0.35).max(0.01))
+    )).as_light().unwrap();
+
+    renderer.scene_mut().insert_actor(SceneActor::light(
+        point_light([ 0.0, 2.5,  0.0], [1.0, 0.85, 0.6], 4.0, 8.0)
+    ));
+    renderer.scene_mut().insert_actor(SceneActor::light(
+        point_light([-2.5, 2.0, -1.5], [0.4, 0.6,  1.0], 3.5, 7.0)
+    ));
+    renderer.scene_mut().insert_actor(SceneActor::light(
+        point_light([ 2.5, 1.8,  1.5], [1.0, 0.3,  0.3], 3.0, 6.0)
+    ));
+
+    renderer.set_ambient([0.15, 0.18, 0.25], 0.08);
+
+    HelioRenderState {
+        renderer,
+        cube1_obj, cube2_obj, cube3_obj,
+        sun_light_id,
+        sun_angle: init_sun_angle,
+        animation_time: 0.0,
+        cam_pos: glam::Vec3::new(0.0, 2.5, 7.0),
+        cam_yaw: 0.0,
+        cam_pitch: -0.2,
+        width,
+        height,
+    }
 }
 
-@fragment
-fn fs_main(in: VSOut) -> @location(0) vec4<f32> {
-    let light = normalize(vec3<f32>(0.5, 1.0, 0.3));
-    let n = normalize(in.normal);
-    let diff = max(dot(n, light), 0.0);
-    return vec4<f32>(in.color * diff, 1.0);
-}
-"#)),
-                                });
+fn main() {
+    env_logger::init();
+    Application::new().run(|cx: &mut App| {
+        _ = cx.open_window(WindowOptions::default(), |window: &mut Window, cx: &mut App| {
+            let surface = window
+                .create_wgpu_surface(1720, 1080, wgpu::TextureFormat::Rgba8UnormSrgb)
+                .expect("WgpuSurface not supported on this platform");
 
-                                let bind_group_layout =
-                                    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-                                        label: Some("CubeBGL"),
-                                        entries: &[wgpu::BindGroupLayoutEntry {
-                                            binding: 0,
-                                            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
-                                            ty: wgpu::BindingType::Buffer {
-                                                ty: wgpu::BufferBindingType::Uniform,
-                                                has_dynamic_offset: false,
-                                                min_binding_size: None,
-                                            },
-                                            count: None,
-                                        }],
-                                    });
-                                let pipeline_layout =
-                                    device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                                        label: Some("CubePipelineLayout"),
-                                        bind_group_layouts: &[&bind_group_layout],
-                                        immediate_size: 0,
-                                    });
-                                let pipeline =
-                                    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                                        label: Some("CubePipeline"),
-                                        layout: Some(&pipeline_layout),
-                                        vertex: wgpu::VertexState {
-                                            module: &shader,
-                                            entry_point: Some("vs_main"),
-                                            buffers: &[wgpu::VertexBufferLayout {
-                                                array_stride: std::mem::size_of::<Vertex>() as wgpu::BufferAddress,
-                                                step_mode: wgpu::VertexStepMode::Vertex,
-                                                attributes: &[
-                                                    wgpu::VertexAttribute {
-                                                        format: wgpu::VertexFormat::Float32x3,
-                                                        offset: 0,
-                                                        shader_location: 0,
-                                                    },
-                                                    wgpu::VertexAttribute {
-                                                        format: wgpu::VertexFormat::Float32x3,
-                                                        offset: 4 * 3,
-                                                        shader_location: 1,
-                                                    },
-                                                    wgpu::VertexAttribute {
-                                                        format: wgpu::VertexFormat::Float32x3,
-                                                        offset: 4 * 6,
-                                                        shader_location: 2,
-                                                    },
-                                                ],
-                                            }],
-                                            compilation_options: wgpu::PipelineCompilationOptions::default(),
-                                        },
-                                        fragment: Some(wgpu::FragmentState {
-                                            module: &shader,
-                                            entry_point: Some("fs_main"),
-                                            targets: &[Some(wgpu::ColorTargetState {
-                                                format: wgpu::TextureFormat::Rgba8UnormSrgb,
-                                                blend: Some(wgpu::BlendState::REPLACE),
-                                                write_mask: wgpu::ColorWrites::ALL,
-                                            })],
-                                            compilation_options: wgpu::PipelineCompilationOptions::default(),
-                                        }),
-                                        primitive: wgpu::PrimitiveState {
-                                            topology: wgpu::PrimitiveTopology::TriangleList,
-                                            ..Default::default()
-                                        },
-                                        depth_stencil: Some(wgpu::DepthStencilState {
-                                            format: wgpu::TextureFormat::Depth24Plus,
-                                            depth_write_enabled: true,
-                                            depth_compare: wgpu::CompareFunction::Less,
-                                            stencil: wgpu::StencilState::default(),
-                                            bias: wgpu::DepthBiasState::default(),
-                                        }),
-                                        multisample: wgpu::MultisampleState::default(),
-                                        multiview_mask: None,
-                                        cache: None,
-                                    });
-
-                                let vertices: [Vertex; 36] = [
-                                    Vertex{position:[-1.0,-1.0,1.0],normal:[0.0,0.0,1.0],color:[1.0,0.0,0.0]},
-                                    Vertex{position:[1.0,-1.0,1.0],normal:[0.0,0.0,1.0],color:[1.0,0.0,0.0]},
-                                    Vertex{position:[1.0,1.0,1.0],normal:[0.0,0.0,1.0],color:[1.0,0.0,0.0]},
-                                    Vertex{position:[-1.0,-1.0,1.0],normal:[0.0,0.0,1.0],color:[1.0,0.0,0.0]},
-                                    Vertex{position:[1.0,1.0,1.0],normal:[0.0,0.0,1.0],color:[1.0,0.0,0.0]},
-                                    Vertex{position:[-1.0,1.0,1.0],normal:[0.0,0.0,1.0],color:[1.0,0.0,0.0]},
-                                    Vertex{position:[1.0,-1.0,-1.0],normal:[0.0,0.0,-1.0],color:[0.0,1.0,0.0]},
-                                    Vertex{position:[-1.0,-1.0,-1.0],normal:[0.0,0.0,-1.0],color:[0.0,1.0,0.0]},
-                                    Vertex{position:[-1.0,1.0,-1.0],normal:[0.0,0.0,-1.0],color:[0.0,1.0,0.0]},
-                                    Vertex{position:[1.0,-1.0,-1.0],normal:[0.0,0.0,-1.0],color:[0.0,1.0,0.0]},
-                                    Vertex{position:[-1.0,1.0,-1.0],normal:[0.0,0.0,-1.0],color:[0.0,1.0,0.0]},
-                                    Vertex{position:[1.0,1.0,-1.0],normal:[0.0,0.0,-1.0],color:[0.0,1.0,0.0]},
-                                    Vertex{position:[-1.0,1.0,1.0],normal:[0.0,1.0,0.0],color:[0.0,0.0,1.0]},
-                                    Vertex{position:[1.0,1.0,1.0],normal:[0.0,1.0,0.0],color:[0.0,0.0,1.0]},
-                                    Vertex{position:[1.0,1.0,-1.0],normal:[0.0,1.0,0.0],color:[0.0,0.0,1.0]},
-                                    Vertex{position:[-1.0,1.0,1.0],normal:[0.0,1.0,0.0],color:[0.0,0.0,1.0]},
-                                    Vertex{position:[1.0,1.0,-1.0],normal:[0.0,1.0,0.0],color:[0.0,0.0,1.0]},
-                                    Vertex{position:[-1.0,1.0,-1.0],normal:[0.0,1.0,0.0],color:[0.0,0.0,1.0]},
-                                    Vertex{position:[-1.0,-1.0,-1.0],normal:[0.0,-1.0,0.0],color:[1.0,1.0,0.0]},
-                                    Vertex{position:[1.0,-1.0,-1.0],normal:[0.0,-1.0,0.0],color:[1.0,1.0,0.0]},
-                                    Vertex{position:[1.0,-1.0,1.0],normal:[0.0,-1.0,0.0],color:[1.0,1.0,0.0]},
-                                    Vertex{position:[-1.0,-1.0,-1.0],normal:[0.0,-1.0,0.0],color:[1.0,1.0,0.0]},
-                                    Vertex{position:[1.0,-1.0,1.0],normal:[0.0,-1.0,0.0],color:[1.0,1.0,0.0]},
-                                    Vertex{position:[-1.0,-1.0,1.0],normal:[0.0,-1.0,0.0],color:[1.0,1.0,0.0]},
-                                    Vertex{position:[1.0,-1.0,1.0],normal:[1.0,0.0,0.0],color:[1.0,0.0,1.0]},
-                                    Vertex{position:[1.0,-1.0,-1.0],normal:[1.0,0.0,0.0],color:[1.0,0.0,1.0]},
-                                    Vertex{position:[1.0,1.0,-1.0],normal:[1.0,0.0,0.0],color:[1.0,0.0,1.0]},
-                                    Vertex{position:[1.0,-1.0,1.0],normal:[1.0,0.0,0.0],color:[1.0,0.0,1.0]},
-                                    Vertex{position:[1.0,1.0,-1.0],normal:[1.0,0.0,0.0],color:[1.0,0.0,1.0]},
-                                    Vertex{position:[1.0,1.0,1.0],normal:[1.0,0.0,0.0],color:[1.0,0.0,1.0]},
-                                    Vertex{position:[-1.0,-1.0,-1.0],normal:[-1.0,0.0,0.0],color:[0.0,1.0,1.0]},
-                                    Vertex{position:[-1.0,-1.0,1.0],normal:[-1.0,0.0,0.0],color:[0.0,1.0,1.0]},
-                                    Vertex{position:[-1.0,1.0,1.0],normal:[-1.0,0.0,0.0],color:[0.0,1.0,1.0]},
-                                    Vertex{position:[-1.0,-1.0,-1.0],normal:[-1.0,0.0,0.0],color:[0.0,1.0,1.0]},
-                                    Vertex{position:[-1.0,1.0,1.0],normal:[-1.0,0.0,0.0],color:[0.0,1.0,1.0]},
-                                    Vertex{position:[-1.0,1.0,-1.0],normal:[-1.0,0.0,0.0],color:[0.0,1.0,1.0]},
-                                ];
-                                let vertex_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
-                                    label: Some("CubeVertexBuf"),
-                                    contents: bytemuck::cast_slice(&vertices),
-                                    usage: wgpu::BufferUsages::VERTEX,
-                                });
-                                let vertex_count = vertices.len() as u32;
-
-                                // depth texture for 3D ordering
-                                let depth_tex = device.create_texture(&wgpu::TextureDescriptor {
-                                    label: Some("CubeDepth"),
-                                    size: wgpu::Extent3d { width: 400, height: 300, depth_or_array_layers: 1 },
-                                    mip_level_count: 1,
-                                    sample_count: 1,
-                                    dimension: wgpu::TextureDimension::D2,
-                                    format: wgpu::TextureFormat::Depth24Plus,
-                                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                                    view_formats: &[],
-                                });
-                                let depth_view = depth_tex.create_view(&wgpu::TextureViewDescriptor::default());
-
-                                let uniform_buf = device.create_buffer_init(&wgpu::util::BufferInitDescriptor{
-                                    label: Some("CubeUniformBuf"),
-                                    contents: bytemuck::cast_slice(&[0f32]),
-                                    usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
-                                });
-                                let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor{
-                                    label: Some("CubeBindGroup"),
-                                    layout: &bind_group_layout,
-                                    entries: &[wgpu::BindGroupEntry{
-                                        binding: 0,
-                                        resource: uniform_buf.as_entire_binding(),
-                                    }],
-                                });
-
-                                *r = Some(CubeResources{
-                                    pipeline: pipeline.clone(),
-                                    uniform_buf: uniform_buf.clone(),
-                                    bind_group: bind_group.clone(),
-                                    vert_buf: vertex_buf.clone(),
-                                    vertex_count,
-                                });
-                            }
-                            let res = r.as_ref().unwrap();
-                            (res.pipeline.clone(), res.uniform_buf.clone(), res.bind_group.clone(), res.vert_buf.clone(), res.vertex_count)
-                        });
-
-                    queue.write_buffer(&uniform_buf, 0, bytemuck::cast_slice(&[t]));
-
-                    // depth texture/view sized to match the returned view dimensions
-                    let depth_tex = device.create_texture(&wgpu::TextureDescriptor {
-                        label: Some("CubeDepth"),
-                        size: wgpu::Extent3d { width: dw, height: dh, depth_or_array_layers: 1 },
-                        mip_level_count: 1,
-                        sample_count: 1,
-                        dimension: wgpu::TextureDimension::D2,
-                        format: wgpu::TextureFormat::Depth24Plus,
-                        usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
-                        view_formats: &[],
-                    });
-                    let depth_view = depth_tex.create_view(&wgpu::TextureViewDescriptor::default());
-
-                    let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor{
-                        label: Some("SurfaceExample Encoder"),
-                    });
-                    {
-                        let mut rpass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor{
-                            label: Some("SurfaceExample Pass"),
-                            color_attachments: &[Some(wgpu::RenderPassColorAttachment{
-                                view: &view,
-                                resolve_target: None,
-                                ops: wgpu::Operations{
-                                    load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                                    store: wgpu::StoreOp::Store,
-                                },
-                            })],
-                            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment{
-                                view: &depth_view,
-                                depth_ops: Some(wgpu::Operations{
-                                    load: wgpu::LoadOp::Clear(1.0),
-                                    store: wgpu::StoreOp::Store,
-                                }),
-                                stencil_ops: None,
-                            }),
-                            occlusion_query_set: None,
-                            timestamp_writes: None,
-                        });
-                        rpass.set_pipeline(&pipeline);
-                        rpass.set_bind_group(0, &bind_group, &[]);
-                        rpass.set_vertex_buffer(0, vert_buf.slice(..));
-                        rpass.draw(0..vertex_count, 0..1);
-                    }
-                    let _ = queue.submit(Some(encoder.finish()));                    surface_thread.present();
-                    frame = frame.wrapping_add(1);
-
-                    // update frame counter and report once per second
-                    frame_count = frame_count.wrapping_add(1);
-                    let now = std::time::Instant::now();
-                    if now.duration_since(last_report) >= Duration::from_secs(1) {
-                        let fps = frame_count as f64; // frames per second
-                        *fps_shared.lock().unwrap() = fps;
-                        frame_count = 0;
-                        last_report = now;
-                    }
-                }
-            });
-
-            // construct entity and keep handle in outer scope
-            let handle = cx.new(|_cx| SurfaceExample { surface, fps_rx, display_fps: 0.0 });
-            // timer thread: wake once per second and push fps into channel
-            let fps_shared = fps_data.clone();
-            let tx_clone = fps_tx.clone();
-            thread::spawn(move || {
-                loop {
-                    std::thread::sleep(Duration::from_secs(1));
-                    let val = *fps_shared.lock().unwrap();
-                    let _ = tx_clone.send(val);
-                }
-            });
-            handle
+            let now = std::time::Instant::now();
+            cx.new(|_cx| SurfaceExample {
+                surface,
+                state: None,
+                last_frame_time: now,
+                frame_count: 0,
+                last_fps_update: now,
+                display_fps: 0.0,
+            })
         });
     });
 }
